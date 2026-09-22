@@ -62,6 +62,8 @@ setx WEASEL_JEV_APPS "notepad.exe,winword.exe"
 
 `WEASEL_JEV_APPS` 是必填的應用白名單；只有名單中的程序會向 `https://api.typesafe.ai/v1/systemone` 發送最多 128 個最近輸入字符、當前拼音和當頁候選。焦點離開輸入區後，本地上下文會被清除。環境變量生效後需重啟小狼毫服務。
 
+本分支構建成功後，可在 [Releases](https://github.com/sunqfeng/weasel/releases) 下載名稱以 `weasel` 開頭的實驗版安裝程序。安裝程序未簽名，Windows SmartScreen 可能顯示安全提示。
+
 致謝
 ----
 
