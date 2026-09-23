@@ -48,6 +48,7 @@ struct JevState {
   struct Result : Request {
     size_t candidate = 0;
     double probability = 0;
+    double runner_up_probability = -1;
   };
 
   std::string api_key;
@@ -183,6 +184,14 @@ std::optional<JevState::Result> ParseJevResponse(
     result.probability = response.get<double>(
         "answers.candidate.probabilities." + choice,
         response.get<double>("answers.candidate.confidence", 0));
+    for (size_t i = 0; i < request.candidates.size(); ++i) {
+      if (i == candidate)
+        continue;
+      const auto probability = response.get_optional<double>(
+          "answers.candidate.probabilities.c" + std::to_string(i));
+      if (probability && *probability > result.runner_up_probability)
+        result.runner_up_probability = *probability;
+    }
     return result;
   } catch (const std::exception& error) {
     JEV_LOG() << "Jev response parse failed: generation=" << request.generation
@@ -193,6 +202,17 @@ std::optional<JevState::Result> ParseJevResponse(
               << ", error=unknown";
     return std::nullopt;
   }
+}
+
+bool IsJevRecommendationConfident(const JevState::Result& result) {
+  constexpr double kHighConfidence = 0.60;
+  constexpr double kMinimumConfidence = 0.40;
+  constexpr double kMinimumLead = 0.10;
+  if (result.probability >= kHighConfidence)
+    return true;
+  return result.runner_up_probability >= 0 &&
+         result.probability >= kMinimumConfidence &&
+         result.probability - result.runner_up_probability >= kMinimumLead;
 }
 
 std::optional<JevState::Result> AskJev(const std::string& api_key,
@@ -208,8 +228,10 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   boost::property_tree::ptree question;
   question.put("type", "choice");
   question.put("instructions",
-               "Choose the Chinese candidate that best fits the committed "
-               "context and phonetic input.");
+               "Choose the candidate that is the most natural continuation "
+               "of the committed Chinese context. Prioritize the immediate "
+               "context and Chinese grammar over the default candidate order; "
+               "use the phonetic input to disambiguate candidates.");
   question.add_child("criteria", criteria);
 
   boost::property_tree::ptree questions;
@@ -812,7 +834,17 @@ void RimeWithWeaselHandler::_StartJev() {
   auto parsed = ParseJevResponse(
       response_check,
       R"({"answers":{"candidate":{"choice":"c1","probabilities":{"c0":0.02,"c1":0.98},"confidence":0.97}}})");
-  assert(parsed && parsed->candidate == 1 && parsed->probability == 0.98);
+  assert(parsed && parsed->candidate == 1 && parsed->probability == 0.98 &&
+         parsed->runner_up_probability == 0.02 &&
+         IsJevRecommendationConfident(*parsed));
+  auto contextual_choice = ParseJevResponse(
+      response_check,
+      R"({"answers":{"candidate":{"choice":"c1","probabilities":{"c0":0.21,"c1":0.44},"confidence":0.44}}})");
+  assert(contextual_choice && IsJevRecommendationConfident(*contextual_choice));
+  auto ambiguous_choice = ParseJevResponse(
+      response_check,
+      R"({"answers":{"candidate":{"choice":"c1","probabilities":{"c0":0.38,"c1":0.44},"confidence":0.44}}})");
+  assert(ambiguous_choice && !IsJevRecommendationConfident(*ambiguous_choice));
 #endif
 
   const std::string enabled =
@@ -897,6 +929,8 @@ void RimeWithWeaselHandler::_StartJev() {
           JEV_LOG() << "Jev result ready: generation=" << request.generation
                     << ", candidate=" << result->candidate
                     << ", probability=" << result->probability
+                    << ", runner_up_probability="
+                    << result->runner_up_probability
                     << ", elapsed_ms=" << elapsed;
           state->result = std::move(result);
           result_ready = state->result_ready;
@@ -1018,10 +1052,11 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
     result = std::move(m_jev->result);
     m_jev->result.reset();
   }
-  if (result->probability < 0.60) {
+  if (!IsJevRecommendationConfident(*result)) {
     JEV_LOG() << "Jev result ignored: generation=" << result->generation
               << ", probability=" << result->probability
-              << ", reason=below_threshold";
+              << ", runner_up_probability=" << result->runner_up_probability
+              << ", reason=insufficient_lead";
     return false;
   }
 
@@ -1045,13 +1080,15 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
                                                   result->candidate);
     JEV_LOG() << "Jev result applied: generation=" << result->generation
               << ", candidate=" << result->candidate
-              << ", probability=" << result->probability;
+              << ", probability=" << result->probability
+              << ", runner_up_probability=" << result->runner_up_probability;
     rime_api->free_context(&ctx);
     return true;
   } else {
     JEV_LOG() << "Jev result kept current candidate: generation="
               << result->generation << ", candidate=" << result->candidate
-              << ", probability=" << result->probability;
+              << ", probability=" << result->probability
+              << ", runner_up_probability=" << result->runner_up_probability;
   }
   rime_api->free_context(&ctx);
   return false;
