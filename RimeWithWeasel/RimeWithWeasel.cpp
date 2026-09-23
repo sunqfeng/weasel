@@ -59,6 +59,7 @@ struct JevState {
   uint64_t generation = 0;
   bool stopping = false;
   std::thread worker;
+  std::function<void()> result_ready;
 };
 
 namespace {
@@ -841,6 +842,10 @@ void RimeWithWeaselHandler::_StartJev() {
   auto jev = std::make_unique<JevState>();
   jev->api_key = api_key;
   jev->allowed_apps = allowed_apps;
+  jev->result_ready = [this] {
+    if (_JevResultReadyCallback)
+      _JevResultReadyCallback();
+  };
   jev->worker = std::thread([state = jev.get()] {
     for (;;) {
       JevState::Request request;
@@ -878,21 +883,27 @@ void RimeWithWeaselHandler::_StartJev() {
         continue;
       }
 
-      std::lock_guard<std::mutex> lock(state->mutex);
-      if (state->stopping) {
-        JEV_LOG() << "Jev result discarded: generation=" << request.generation
-                  << ", reason=stopping, elapsed_ms=" << elapsed;
-      } else if (request.generation != state->generation) {
-        JEV_LOG() << "Jev result discarded: generation=" << request.generation
-                  << ", current_generation=" << state->generation
-                  << ", reason=stale, elapsed_ms=" << elapsed;
-      } else {
-        JEV_LOG() << "Jev result ready: generation=" << request.generation
-                  << ", candidate=" << result->candidate
-                  << ", probability=" << result->probability
-                  << ", elapsed_ms=" << elapsed;
-        state->result = std::move(result);
+      std::function<void()> result_ready;
+      {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->stopping) {
+          JEV_LOG() << "Jev result discarded: generation=" << request.generation
+                    << ", reason=stopping, elapsed_ms=" << elapsed;
+        } else if (request.generation != state->generation) {
+          JEV_LOG() << "Jev result discarded: generation=" << request.generation
+                    << ", current_generation=" << state->generation
+                    << ", reason=stale, elapsed_ms=" << elapsed;
+        } else {
+          JEV_LOG() << "Jev result ready: generation=" << request.generation
+                    << ", candidate=" << result->candidate
+                    << ", probability=" << result->probability
+                    << ", elapsed_ms=" << elapsed;
+          state->result = std::move(result);
+          result_ready = state->result_ready;
+        }
       }
+      if (result_ready)
+        result_ready();
     }
   });
   m_jev = std::move(jev);
@@ -982,36 +993,36 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
   m_jev->changed.notify_one();
 }
 
-void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
+bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   if (!m_jev)
-    return;
+    return false;
   const SessionStatus& status = get_session_status(ipc_id);
   if (m_jev->allowed_apps.find(status.client_app) ==
       m_jev->allowed_apps.end()) {
-    return;
+    return false;
   }
   std::optional<JevState::Result> result;
   {
     std::lock_guard<std::mutex> lock(m_jev->mutex);
     if (!m_jev->result) {
-      JEV_LOG() << "Jev result unavailable at selection time: session="
-                << ipc_id << ", app=" << status.client_app;
-      return;
+      JEV_LOG() << "Jev result unavailable: session=" << ipc_id
+                << ", app=" << status.client_app;
+      return false;
     }
     if (m_jev->result->session != ipc_id) {
-      JEV_LOG() << "Jev result ignored at selection time: session=" << ipc_id
+      JEV_LOG() << "Jev result ignored: session=" << ipc_id
                 << ", result_session=" << m_jev->result->session
                 << ", reason=session_mismatch";
-      return;
+      return false;
     }
     result = std::move(m_jev->result);
     m_jev->result.reset();
   }
   if (result->probability < 0.60) {
-    JEV_LOG() << "Jev result ignored at selection time: generation="
-              << result->generation << ", probability=" << result->probability
+    JEV_LOG() << "Jev result ignored: generation=" << result->generation
+              << ", probability=" << result->probability
               << ", reason=below_threshold";
-    return;
+    return false;
   }
 
   RimeSessionId session_id = to_session_id(ipc_id);
@@ -1019,7 +1030,7 @@ void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   if (!rime_api->get_context(session_id, &ctx)) {
     JEV_LOG() << "Jev result could not be applied: generation="
               << result->generation << ", reason=context_unavailable";
-    return;
+    return false;
   }
   bool matches =
       ctx.composition.preedit && result->preedit == ctx.composition.preedit &&
@@ -1027,20 +1038,23 @@ void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   for (size_t i = 0; matches && i < result->candidates.size(); ++i)
     matches = result->candidates[i] == ctx.menu.candidates[i].text;
   if (!matches) {
-    JEV_LOG() << "Jev result ignored at selection time: generation="
-              << result->generation << ", reason=candidates_changed";
+    JEV_LOG() << "Jev result ignored: generation=" << result->generation
+              << ", reason=candidates_changed";
   } else if (result->candidate != ctx.menu.highlighted_candidate_index) {
     rime_api->highlight_candidate_on_current_page(session_id,
                                                   result->candidate);
     JEV_LOG() << "Jev result applied: generation=" << result->generation
               << ", candidate=" << result->candidate
               << ", probability=" << result->probability;
+    rime_api->free_context(&ctx);
+    return true;
   } else {
     JEV_LOG() << "Jev result kept current candidate: generation="
               << result->generation << ", candidate=" << result->candidate
               << ", probability=" << result->probability;
   }
   rime_api->free_context(&ctx);
+  return false;
 }
 
 void RimeWithWeaselHandler::StartMaintenance() {
@@ -1078,6 +1092,19 @@ void RimeWithWeaselHandler::SetOption(WeaselSessionId ipc_id,
 
 void RimeWithWeaselHandler::OnUpdateUI(std::function<void()> const& cb) {
   _UpdateUICallback = cb;
+}
+
+void RimeWithWeaselHandler::OnJevResultReady(std::function<void()> const& cb) {
+  _JevResultReadyCallback = cb;
+}
+
+void RimeWithWeaselHandler::ApplyPendingJevResult() {
+  const WeaselSessionId ipc_id = m_active_session;
+  if (!ipc_id ||
+      m_session_status_map.find(ipc_id) == m_session_status_map.end())
+    return;
+  if (_ApplyJev(ipc_id))
+    _UpdateUI(ipc_id);
 }
 
 bool RimeWithWeaselHandler::_IsDeployerRunning() {

@@ -38,6 +38,7 @@ enum WEASEL_IPC_COMMAND {
 // Posted by WeaselTrayIcon to the server window so that Shell_NotifyIcon runs
 // on the server message thread instead of a pipe worker thread.
 #define WM_WEASEL_SERVICE_NOTIFY (WEASEL_IPC_LAST_COMMAND + 200)
+#define WM_WEASEL_JEV_RESULT (WM_WEASEL_SERVICE_NOTIFY + 1)
 
 namespace weasel {
 struct PipeMessage {
@@ -85,6 +86,7 @@ struct RequestHandler {
   virtual void EndMaintenance() {}
   virtual void SetOption(DWORD session_id, const std::string& opt, bool val) {}
   virtual void UpdateColorTheme(BOOL darkMode) {}
+  virtual void ApplyPendingJevResult() {}
 };
 
 // 處理server端回應之物件
@@ -170,6 +172,9 @@ class Server {
   // Callback invoked on the server message thread when a tray icon refresh is
   // requested from a pipe worker thread.
   void SetTrayRefreshCallback(std::function<void()> callback);
+
+  // Post an asynchronous Jev result to the server message thread.
+  void NotifyJevResult();
 
  private:
   ServerImpl* m_pImpl;

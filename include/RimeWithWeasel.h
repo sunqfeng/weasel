@@ -68,8 +68,10 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                          const std::string& opt,
                          bool val);
   virtual void UpdateColorTheme(BOOL darkMode);
+  virtual void ApplyPendingJevResult();
 
   void OnUpdateUI(std::function<void()> const& cb);
+  void OnJevResultReady(std::function<void()> const& cb);
 
  private:
   void _Setup();
@@ -93,7 +95,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   void _StartJev();
   void _StopJev();
   void _ScheduleJev(WeaselSessionId ipc_id, const RimeContext& ctx);
-  void _ApplyJev(WeaselSessionId ipc_id);
+  bool _ApplyJev(WeaselSessionId ipc_id);
 
   RimeSessionId to_session_id(WeaselSessionId ipc_id) {
     return m_session_status_map[ipc_id].session_id;
@@ -115,6 +117,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   std::map<std::string, bool> m_show_notifications;
   std::map<std::string, bool> m_show_notifications_base;
   std::function<void()> _UpdateUICallback;
+  std::function<void()> _JevResultReadyCallback;
 
   static void OnNotify(void* context_object,
                        uintptr_t session_id,
