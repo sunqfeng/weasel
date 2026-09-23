@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <mutex>
+#include <vector>
 
 #include <rime_api.h>
 
@@ -36,6 +37,9 @@ struct SessionStatus {
   std::string client_app;
   std::string jev_history;
   std::string jev_last_signature;
+  std::vector<size_t> jev_display_order;
+  std::vector<std::string> jev_ranked_candidates;
+  std::string jev_pending_commit;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
 typedef DWORD WeaselSessionId;
@@ -82,7 +86,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   bool _ShowMessage(weasel::Context& ctx, weasel::Status& status);
   bool _Respond(WeaselSessionId ipc_id, EatLine eat);
   void _ReadClientInfo(WeaselSessionId ipc_id, LPWSTR buffer);
-  void _GetCandidateInfo(weasel::CandidateInfo& cinfo, RimeContext& ctx);
+  void _GetCandidateInfo(weasel::CandidateInfo& cinfo,
+                         RimeContext& ctx,
+                         WeaselSessionId ipc_id);
   void _GetStatus(weasel::Status& stat,
                   WeaselSessionId ipc_id,
                   weasel::Context& ctx);
@@ -93,7 +99,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   void _StartJev();
   void _StopJev();
   void _ScheduleJev(WeaselSessionId ipc_id, const RimeContext& ctx);
-  void _ApplyJev(WeaselSessionId ipc_id);
+  bool _ApplyJev(WeaselSessionId ipc_id);
 
   RimeSessionId to_session_id(WeaselSessionId ipc_id) {
     return m_session_status_map[ipc_id].session_id;

@@ -3,6 +3,7 @@
 
 #include "stdafx.h"
 #include <boost/detail/lightweight_test.hpp>
+#include <JevIntentRouter.h>
 #include <ResponseParser.h>
 #include <string>
 
@@ -85,12 +86,62 @@ void test_4() {
   BOOST_TEST_EQ(1, c.totalPages);
 }
 
+void test_jev_choices() {
+  using namespace weasel::jev;
+  BOOST_TEST(ClassifyText("\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93") == "han");
+  BOOST_TEST(ClassifyText("OpenAI") == "latin");
+  BOOST_TEST(ClassifyText("OpenAI\xe5\x8a\xa9\xe6\x89\x8b") == "mixed");
+  BOOST_TEST(IsSafeRawInput("wozhidao"));
+  BOOST_TEST(!IsSafeRawInput("wo zhi dao"));
+  BOOST_TEST(!IsSafeRawInput("\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93"));
+
+  const std::vector<std::string> candidates = {
+      "\xe6\x88\x91\xe6\x8c\x87\xe5\xae\x9a",
+      "\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93", "wozhidao"};
+  const auto choices = BuildChoices(candidates, "wozhidao");
+  BOOST_TEST_EQ(4, choices.size());
+  BOOST_TEST(choices[0].key == "candidate_0");
+  BOOST_TEST(choices[3].key == "raw_input");
+}
+
+void test_jev_ranking_and_validation() {
+  using namespace weasel::jev;
+  RequestSnapshot request;
+  request.generation = 7;
+  request.session = 42;
+  request.context = "\xe8\xbf\x99\xe4\xb8\xaa\xe9\x97\xae\xe9\xa2\x98";
+  request.input = "wozhid";
+  request.candidates = {"\xe6\x88\x91\xe6\x8c\x87\xe5\xae\x9a",
+                        "\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93",
+                        "\xe6\x88\x91\xe5\x8f\xaa\xe5\xaf\xb9"};
+  request.choices = BuildChoices(request.candidates, request.input);
+  const auto decision = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})");
+  BOOST_TEST(decision.has_value());
+  if (!decision)
+    return;
+  BOOST_TEST_EQ(1, decision->selected.candidate_index);
+  BOOST_TEST_EQ(1, decision->ranking[0].candidate_index);
+  BOOST_TEST_EQ(0, decision->ranking[1].candidate_index);
+  BOOST_TEST_EQ(2, decision->ranking[2].candidate_index);
+  BOOST_TEST(MatchesSnapshot(*decision, 42, "wozhid", request.candidates));
+  BOOST_TEST(!MatchesSnapshot(*decision, 43, "wozhid", request.candidates));
+  BOOST_TEST(!MatchesSnapshot(*decision, 42, "changed", request.candidates));
+
+  const auto invalid = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"invented_text","confidence":0.99}}})");
+  BOOST_TEST(!invalid);
+}
+
 int _tmain(int argc, _TCHAR* argv[]) {
   test_1();
   test_2();
   test_3();
   test_4();
+  test_jev_choices();
+  test_jev_ranking_and_validation();
 
-  system("pause");
   return boost::report_errors();
 }
