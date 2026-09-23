@@ -209,8 +209,7 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   }
   if (!WinHttpReceiveResponse(http_request, nullptr)) {
     LOG(WARNING) << "Jev request failed: generation=" << request.generation
-                 << ", stage=WinHttpReceiveResponse, error="
-                 << GetLastError();
+                 << ", stage=WinHttpReceiveResponse, error=" << GetLastError();
     return std::nullopt;
   }
 
@@ -242,8 +241,8 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
     if (!available)
       break;
     if (response.size() + available > 1024 * 1024) {
-      LOG(WARNING) << "Jev response rejected: generation="
-                   << request.generation << ", reason=response_too_large";
+      LOG(WARNING) << "Jev response rejected: generation=" << request.generation
+                   << ", reason=response_too_large";
       return std::nullopt;
     }
     const size_t offset = response.size();
@@ -264,8 +263,8 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   }
   auto result = ParseJevResponse(request, response);
   if (!result) {
-    LOG(WARNING) << "Jev response rejected: generation="
-                 << request.generation << ", http_status=" << status
+    LOG(WARNING) << "Jev response rejected: generation=" << request.generation
+                 << ", http_status=" << status
                  << ", response_bytes=" << response.size();
   }
   return result;
@@ -774,8 +773,7 @@ void RimeWithWeaselHandler::_StartJev() {
                << ", api_key_configured=" << !api_key.empty()
                << ", allowed_apps=" << allowed_apps.size();
   if (!enabled_by_config) {
-    LOG(WARNING)
-        << "Jev candidate recommendation disabled by configuration.";
+    LOG(WARNING) << "Jev candidate recommendation disabled by configuration.";
     return;
   }
   if (api_key.empty()) {
@@ -818,9 +816,10 @@ void RimeWithWeaselHandler::_StartJev() {
                    << ", context_bytes=" << request.context.size()
                    << ", preedit_bytes=" << request.preedit.size();
       auto result = AskJev(state->api_key, request);
-      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - started)
-                               .count();
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - started)
+              .count();
       if (!result) {
         LOG(WARNING) << "Jev request completed without a usable result: "
                      << "generation=" << request.generation
@@ -878,8 +877,7 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
   if (m_jev->allowed_apps.find(status.client_app) ==
       m_jev->allowed_apps.end()) {
     LOG(WARNING) << "Jev request skipped: session=" << ipc_id
-                 << ", app=" << status.client_app
-                 << ", reason=app_not_allowed";
+                 << ", app=" << status.client_app << ", reason=app_not_allowed";
     return;
   }
   if (ctx.menu.page_no != 0) {
@@ -916,8 +914,7 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
   }
   if (signature == status.jev_last_signature) {
     LOG(WARNING) << "Jev request skipped: session=" << ipc_id
-                 << ", app=" << status.client_app
-                 << ", reason=duplicate_state";
+                 << ", app=" << status.client_app << ", reason=duplicate_state";
     return;
   }
   status.jev_last_signature = std::move(signature);
@@ -953,8 +950,7 @@ void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
       return;
     }
     if (m_jev->result->session != ipc_id) {
-      LOG(WARNING) << "Jev result ignored at selection time: session="
-                   << ipc_id
+      LOG(WARNING) << "Jev result ignored at selection time: session=" << ipc_id
                    << ", result_session=" << m_jev->result->session
                    << ", reason=session_mismatch";
       return;
@@ -964,8 +960,9 @@ void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   }
   if (result->probability < 0.60) {
     LOG(WARNING) << "Jev result ignored at selection time: generation="
-                 << result->generation << ", probability="
-                 << result->probability << ", reason=below_threshold";
+                 << result->generation
+                 << ", probability=" << result->probability
+                 << ", reason=below_threshold";
     return;
   }
 
@@ -992,8 +989,7 @@ void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
                  << ", probability=" << result->probability;
   } else {
     LOG(WARNING) << "Jev result kept current candidate: generation="
-                 << result->generation
-                 << ", candidate=" << result->candidate
+                 << result->generation << ", candidate=" << result->candidate
                  << ", probability=" << result->probability;
   }
   rime_api->free_context(&ctx);
