@@ -1,0 +1,5 @@
+target("TestJevLogic")
+  set_kind("binary")
+  add_files("./TestJevLogic.cpp", "../../RimeWithWeasel/JevLogic.cpp")
+  add_includedirs("../../RimeWithWeasel")
+  add_rules("subcmd")

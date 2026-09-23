@@ -32,8 +32,25 @@ jobs:
         shell: bash
         run: ./clang-format.sh -i
 
-  build:
+  jev-logic-tests:
     needs: lint
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout last commit
+        uses: actions/checkout@v4
+
+      - name: Build Jev logic tests
+        run: |
+          g++ -std=c++17 -I RimeWithWeasel \
+            RimeWithWeasel/JevLogic.cpp \
+            test/TestJevLogic/TestJevLogic.cpp \
+            -o test_jev_logic
+
+      - name: Run Jev logic tests
+        run: ./test_jev_logic
+
+  build:
+    needs: [lint, jev-logic-tests]
     runs-on: windows-2022
     env:
       boost_version: 1.84.0

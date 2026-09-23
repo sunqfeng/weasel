@@ -30,6 +30,10 @@ setx WEASEL_JEV_APPS "notepad.exe,winword.exe"
 
 关闭功能可运行 `setx WEASEL_JEV_ENABLED "0"`，随后重新启动小狼毫服务。环境变量中的 API Key 不会因此自动删除。
 
+### Jev 测试
+
+`test/TestJevLogic` 包含不联网的 C++ 单元测试，CI 会自动运行；`test/TestJevAccuracy` 包含带标准答案的中文上下文样本，可以调用真实 Jev API，分别计算模型第一选择准确率和小狼毫按置信度规则实际采用的准确率。运行方法见各目录内的 README。
+
 ## 小狼毫基本使用
 
 - 使用 <kbd>Ctrl</kbd> + <kbd>`</kbd> 或 <kbd>F4</kbd> 打开输入方案菜单。

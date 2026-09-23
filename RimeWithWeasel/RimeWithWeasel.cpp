@@ -1,4 +1,5 @@
 ﻿#include "stdafx.h"
+#include "JevLogic.h"
 #include <logging.h>
 #include <RimeWithWeasel.h>
 #include <StringAlgorithm.hpp>
@@ -37,19 +38,8 @@ typedef enum { COLOR_ABGR = 0, COLOR_ARGB, COLOR_RGBA } ColorFormat;
 using namespace weasel;
 
 struct JevState {
-  struct Request {
-    uint64_t generation = 0;
-    WeaselSessionId session = 0;
-    std::string context;
-    std::string preedit;
-    std::vector<std::string> candidates;
-  };
-
-  struct Result : Request {
-    size_t candidate = 0;
-    double probability = 0;
-    double runner_up_probability = -1;
-  };
+  using Request = jev::Request;
+  using Result = jev::Result;
 
   std::string api_key;
   std::set<std::string> allowed_apps;
@@ -132,87 +122,6 @@ std::string GetEnvironmentUtf8(const wchar_t* name) {
   if (!GetEnvironmentVariableW(name, value.data(), size))
     return {};
   return wtou8(value.data());
-}
-
-std::string LowerAscii(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](char c) {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  });
-  return value;
-}
-
-std::set<std::string> ParseAllowedApps(const std::string& value) {
-  std::set<std::string> apps;
-  std::string app;
-  const auto add = [&]() {
-    app.erase(0, app.find_first_not_of(" \t"));
-    const auto end = app.find_last_not_of(" \t");
-    if (end != std::string::npos)
-      app.erase(end + 1);
-    if (!app.empty())
-      apps.insert(LowerAscii(app));
-    app.clear();
-  };
-  for (char c : value) {
-    if (c == ',' || c == ';')
-      add();
-    else
-      app.push_back(c);
-  }
-  add();
-  return apps;
-}
-
-std::optional<JevState::Result> ParseJevResponse(
-    const JevState::Request& request,
-    const std::string& json) {
-  try {
-    boost::property_tree::ptree response;
-    std::istringstream input(json);
-    boost::property_tree::read_json(input, response);
-    const std::string choice =
-        response.get<std::string>("answers.candidate.choice");
-    if (choice.size() < 2 || choice[0] != 'c')
-      return std::nullopt;
-    const size_t candidate = std::stoul(choice.substr(1));
-    if (candidate >= request.candidates.size())
-      return std::nullopt;
-
-    JevState::Result result;
-    static_cast<JevState::Request&>(result) = request;
-    result.candidate = candidate;
-    result.probability = response.get<double>(
-        "answers.candidate.probabilities." + choice,
-        response.get<double>("answers.candidate.confidence", 0));
-    for (size_t i = 0; i < request.candidates.size(); ++i) {
-      if (i == candidate)
-        continue;
-      const auto probability = response.get_optional<double>(
-          "answers.candidate.probabilities.c" + std::to_string(i));
-      if (probability && *probability > result.runner_up_probability)
-        result.runner_up_probability = *probability;
-    }
-    return result;
-  } catch (const std::exception& error) {
-    JEV_LOG() << "Jev response parse failed: generation=" << request.generation
-              << ", error=" << error.what();
-    return std::nullopt;
-  } catch (...) {
-    JEV_LOG() << "Jev response parse failed: generation=" << request.generation
-              << ", error=unknown";
-    return std::nullopt;
-  }
-}
-
-bool IsJevRecommendationConfident(const JevState::Result& result) {
-  constexpr double kHighConfidence = 0.60;
-  constexpr double kMinimumConfidence = 0.40;
-  constexpr double kMinimumLead = 0.10;
-  if (result.probability >= kHighConfidence)
-    return true;
-  return result.runner_up_probability >= 0 &&
-         result.probability >= kMinimumConfidence &&
-         result.probability - result.runner_up_probability >= kMinimumLead;
 }
 
 std::optional<JevState::Result> AskJev(const std::string& api_key,
@@ -335,7 +244,7 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
     }
     response.resize(offset + read);
   }
-  auto result = ParseJevResponse(request, response);
+  auto result = jev::ParseJevResponse(request, response);
   if (!result) {
     JEV_LOG() << "Jev response rejected: generation=" << request.generation
               << ", http_status=" << status
@@ -826,32 +735,34 @@ void RimeWithWeaselHandler::_StartJev() {
   if (m_jev)
     return;
 #ifndef NDEBUG
-  const auto app_check = ParseAllowedApps(" Notepad.exe; winword.exe ");
+  const auto app_check = jev::ParseAllowedApps(" Notepad.exe; winword.exe ");
   assert(app_check.count("notepad.exe") && app_check.count("winword.exe"));
   JevState::Request response_check;
   response_check.candidates = {"\xe6\xb1\x89\xe5\xad\x90",
                                "\xe6\xb1\x89\xe5\xad\x97"};
-  auto parsed = ParseJevResponse(
+  auto parsed = jev::ParseJevResponse(
       response_check,
       R"({"answers":{"candidate":{"choice":"c1","probabilities":{"c0":0.02,"c1":0.98},"confidence":0.97}}})");
   assert(parsed && parsed->candidate == 1 && parsed->probability == 0.98 &&
          parsed->runner_up_probability == 0.02 &&
-         IsJevRecommendationConfident(*parsed));
-  auto contextual_choice = ParseJevResponse(
+         jev::IsRecommendationConfident(*parsed));
+  auto contextual_choice = jev::ParseJevResponse(
       response_check,
       R"({"answers":{"candidate":{"choice":"c1","probabilities":{"c0":0.21,"c1":0.44},"confidence":0.44}}})");
-  assert(contextual_choice && IsJevRecommendationConfident(*contextual_choice));
-  auto ambiguous_choice = ParseJevResponse(
+  assert(contextual_choice &&
+         jev::IsRecommendationConfident(*contextual_choice));
+  auto ambiguous_choice = jev::ParseJevResponse(
       response_check,
       R"({"answers":{"candidate":{"choice":"c1","probabilities":{"c0":0.38,"c1":0.44},"confidence":0.44}}})");
-  assert(ambiguous_choice && !IsJevRecommendationConfident(*ambiguous_choice));
+  assert(ambiguous_choice &&
+         !jev::IsRecommendationConfident(*ambiguous_choice));
 #endif
 
   const std::string enabled =
-      LowerAscii(GetEnvironmentUtf8(L"WEASEL_JEV_ENABLED"));
+      jev::LowerAscii(GetEnvironmentUtf8(L"WEASEL_JEV_ENABLED"));
   const std::string api_key = GetEnvironmentUtf8(L"TYPESAFE_API_KEY");
   const auto allowed_apps =
-      ParseAllowedApps(GetEnvironmentUtf8(L"WEASEL_JEV_APPS"));
+      jev::ParseAllowedApps(GetEnvironmentUtf8(L"WEASEL_JEV_APPS"));
   const bool enabled_by_config = enabled == "1" || enabled == "true";
   JEV_LOG() << "Jev configuration checked: enabled=" << enabled_by_config
             << ", api_key_configured=" << !api_key.empty()
@@ -994,24 +905,23 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
     return;
   }
 
-  JevState::Request request;
-  request.session = ipc_id;
-  request.context = status.jev_history;
-  request.preedit = ctx.composition.preedit;
-  const size_t candidate_count = std::min<size_t>(ctx.menu.num_candidates, 10);
-  request.candidates.reserve(candidate_count);
-  std::string signature = request.context + "\n" + request.preedit;
-  for (size_t i = 0; i < candidate_count; ++i) {
-    const std::string candidate = ctx.menu.candidates[i].text;
-    request.candidates.push_back(candidate);
-    signature.append("\n").append(candidate);
-  }
-  if (signature == status.jev_last_signature) {
+  std::vector<std::string> page_candidates;
+  page_candidates.reserve(ctx.menu.num_candidates);
+  for (int i = 0; i < ctx.menu.num_candidates; ++i)
+    page_candidates.emplace_back(ctx.menu.candidates[i].text);
+  auto decision = jev::TryScheduleJev(
+      ctx.menu.page_no, ctx.menu.num_candidates, !!ctx.composition.preedit,
+      status.client_app, m_jev->allowed_apps, status.jev_history,
+      ctx.composition.preedit, page_candidates, status.jev_last_signature);
+  if (!decision) {
     JEV_LOG() << "Jev request skipped: session=" << ipc_id
               << ", app=" << status.client_app << ", reason=duplicate_state";
     return;
   }
-  status.jev_last_signature = std::move(signature);
+  JevState::Request request = std::move(decision->request);
+  request.session = ipc_id;
+  status.jev_last_signature = std::move(decision->new_signature);
+  const size_t candidate_count = request.candidates.size();
 
   uint64_t generation = 0;
   {
@@ -1052,7 +962,7 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
     result = std::move(m_jev->result);
     m_jev->result.reset();
   }
-  if (!IsJevRecommendationConfident(*result)) {
+  if (!jev::IsRecommendationConfident(*result)) {
     JEV_LOG() << "Jev result ignored: generation=" << result->generation
               << ", probability=" << result->probability
               << ", runner_up_probability=" << result->runner_up_probability

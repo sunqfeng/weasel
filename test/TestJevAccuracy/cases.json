@@ -1,0 +1,14 @@
+[
+  {"id":"contextual-le","context":"我知道","preedit":"l","candidates":["来","了","里","啦","老"],"expected":"了"},
+  {"id":"meet-tomorrow","context":"我们明天学校","preedit":"jian","candidates":["见","建","间","件","剑"],"expected":"见"},
+  {"id":"take-umbrella","context":"下雨了，出门记得带","preedit":"san","candidates":["三","散","伞","酸"],"expected":"伞"},
+  {"id":"answer-correct","context":"这道题的答案是","preedit":"dui","candidates":["队","兑","堆","对"],"expected":"对"},
+  {"id":"go-home","context":"我现在要回","preedit":"jia","candidates":["加","家","假","价","架"],"expected":"家"},
+  {"id":"turn-off-computer","context":"请把电脑关","preedit":"ji","candidates":["几","及","级","记","机"],"expected":"机"},
+  {"id":"drink-water","context":"我想喝一杯","preedit":"shui","candidates":["水","谁","睡","税"],"expected":"水"},
+  {"id":"happy-birthday","context":"祝你生日快","preedit":"le","candidates":["了","勒","乐","肋"],"expected":"乐"},
+  {"id":"already-finished","context":"这件事我已经完成","preedit":"le","candidates":["乐","勒","肋","了"],"expected":"了"},
+  {"id":"eat-rice","context":"我们晚上一起吃","preedit":"fan","candidates":["反","饭","范","犯","番"],"expected":"饭"},
+  {"id":"makes-sense","context":"他说的话很有道","preedit":"li","candidates":["里","力","利","礼","理"],"expected":"理"},
+  {"id":"meeting-starts","context":"会议马上就要开","preedit":"shi","candidates":["是","时","始","事","市"],"expected":"始"}
+]
