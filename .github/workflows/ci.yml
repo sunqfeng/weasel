@@ -39,6 +39,9 @@ jobs:
       - name: Checkout last commit
         uses: actions/checkout@v4
 
+      - name: Install Boost headers
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev
+
       - name: Build Jev logic tests
         run: |
           g++ -std=c++17 -I RimeWithWeasel \
