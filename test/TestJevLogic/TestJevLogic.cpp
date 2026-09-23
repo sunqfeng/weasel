@@ -14,8 +14,10 @@ using jev::IsRecommendationConfident;
 using jev::LowerAscii;
 using jev::ParseAllowedApps;
 using jev::ParseJevResponse;
+using jev::RemapCandidate;
 using jev::Request;
 using jev::Result;
+using jev::ScoreSource;
 using jev::TryScheduleJev;
 
 // ---------- LowerAscii ----------
@@ -80,6 +82,8 @@ void test_parse_response_normal_with_probabilities() {
   BOOST_TEST(result->candidate == 1u);
   BOOST_TEST(result->probability == 0.98);
   BOOST_TEST(result->runner_up_probability == 0.02);
+  BOOST_TEST(static_cast<int>(result->score_source) ==
+             static_cast<int>(ScoreSource::kProbabilities));
 }
 
 void test_parse_response_falls_back_to_confidence() {
@@ -90,6 +94,9 @@ void test_parse_response_falls_back_to_confidence() {
   BOOST_ASSERT(result.has_value());
   BOOST_TEST(result->candidate == 1u);
   BOOST_TEST(result->probability == 0.81);
+  BOOST_TEST(result->runner_up_probability == -1.0);
+  BOOST_TEST(static_cast<int>(result->score_source) ==
+             static_cast<int>(ScoreSource::kConfidence));
 }
 
 void test_parse_response_no_probability_info_defaults_zero() {
@@ -100,6 +107,8 @@ void test_parse_response_no_probability_info_defaults_zero() {
       ParseJevResponse(req, R"({"answers":{"candidate":{"choice":"c0"}}})");
   BOOST_ASSERT(result.has_value());
   BOOST_TEST(result->probability == 0.0);
+  BOOST_TEST(static_cast<int>(result->score_source) ==
+             static_cast<int>(ScoreSource::kMissing));
 }
 
 void test_parse_response_choice_out_of_range() {
@@ -133,12 +142,14 @@ void test_parse_response_malformed_choice_field() {
 
 void test_confidence_accepts_high_probability() {
   Result result;
+  result.score_source = ScoreSource::kProbabilities;
   result.probability = 0.60;
   BOOST_TEST(IsRecommendationConfident(result));
 }
 
 void test_confidence_accepts_clear_contextual_lead() {
   Result result;
+  result.score_source = ScoreSource::kProbabilities;
   result.probability = 0.48;
   result.runner_up_probability = 0.21;
   BOOST_TEST(IsRecommendationConfident(result));
@@ -146,9 +157,73 @@ void test_confidence_accepts_clear_contextual_lead() {
 
 void test_confidence_rejects_ambiguous_choice() {
   Result result;
+  result.score_source = ScoreSource::kProbabilities;
   result.probability = 0.44;
   result.runner_up_probability = 0.38;
   BOOST_TEST(!IsRecommendationConfident(result));
+}
+
+void test_confidence_fallback_requires_high_threshold() {
+  Result result;
+  result.score_source = ScoreSource::kConfidence;
+  result.probability = 0.44;
+  result.runner_up_probability = 0.10;
+  BOOST_TEST(!IsRecommendationConfident(result));
+  result.probability = 0.60;
+  BOOST_TEST(IsRecommendationConfident(result));
+}
+
+void test_missing_score_is_never_confident() {
+  Result result;
+  result.score_source = ScoreSource::kMissing;
+  result.probability = 1.0;
+  BOOST_TEST(!IsRecommendationConfident(result));
+}
+
+// ---------- RemapCandidate ----------
+
+Result MakeResult(size_t candidate, std::vector<std::string> candidates) {
+  Result result;
+  result.preedit = "pe";
+  result.candidate = candidate;
+  result.candidates = std::move(candidates);
+  return result;
+}
+
+void test_remap_candidate_unchanged_order() {
+  auto result = MakeResult(1, {"a", "b", "c"});
+  auto mapped = RemapCandidate(result, "pe", {"a", "b", "c"});
+  BOOST_ASSERT(mapped.has_value());
+  BOOST_TEST(*mapped == 1u);
+}
+
+void test_remap_candidate_reordered() {
+  auto result = MakeResult(1, {"a", "b", "c"});
+  auto mapped = RemapCandidate(result, "pe", {"c", "a", "b"});
+  BOOST_ASSERT(mapped.has_value());
+  BOOST_TEST(*mapped == 2u);
+}
+
+void test_remap_candidate_allows_extra_current_candidates() {
+  auto result = MakeResult(0, {"a", "b"});
+  auto mapped = RemapCandidate(result, "pe", {"x", "b", "a"});
+  BOOST_ASSERT(mapped.has_value());
+  BOOST_TEST(*mapped == 2u);
+}
+
+void test_remap_candidate_rejects_removed_candidate() {
+  auto result = MakeResult(1, {"a", "b", "c"});
+  BOOST_TEST(!RemapCandidate(result, "pe", {"a", "b"}).has_value());
+}
+
+void test_remap_candidate_rejects_changed_preedit() {
+  auto result = MakeResult(1, {"a", "b"});
+  BOOST_TEST(!RemapCandidate(result, "other", {"a", "b"}).has_value());
+}
+
+void test_remap_candidate_rejects_ambiguous_selected_text() {
+  auto result = MakeResult(1, {"a", "b"});
+  BOOST_TEST(!RemapCandidate(result, "pe", {"b", "a", "b"}).has_value());
 }
 
 void test_parse_response_missing_choice_field() {
@@ -288,6 +363,15 @@ int main() {
   test_confidence_accepts_high_probability();
   test_confidence_accepts_clear_contextual_lead();
   test_confidence_rejects_ambiguous_choice();
+  test_confidence_fallback_requires_high_threshold();
+  test_missing_score_is_never_confident();
+
+  test_remap_candidate_unchanged_order();
+  test_remap_candidate_reordered();
+  test_remap_candidate_allows_extra_current_candidates();
+  test_remap_candidate_rejects_removed_candidate();
+  test_remap_candidate_rejects_changed_preedit();
+  test_remap_candidate_rejects_ambiguous_selected_text();
 
   test_schedule_rejects_when_not_first_page();
   test_schedule_rejects_when_fewer_than_two_candidates();

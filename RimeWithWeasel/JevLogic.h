@@ -15,6 +15,12 @@
 
 namespace jev {
 
+enum class ScoreSource {
+  kProbabilities,
+  kConfidence,
+  kMissing,
+};
+
 // session 使用 uint64_t，从而不依赖 Windows 的 WeaselSessionId/DWORD。
 struct Request {
   uint64_t generation = 0;
@@ -29,7 +35,10 @@ struct Result : Request {
   size_t candidate = 0;
   double probability = 0;
   double runner_up_probability = -1;
+  ScoreSource score_source = ScoreSource::kMissing;
 };
+
+const char* ScoreSourceName(ScoreSource source);
 
 // 等价于原 LowerAscii：仅做 ASCII 范围的大小写折叠。
 std::string LowerAscii(std::string value);
@@ -46,6 +55,15 @@ std::optional<Result> ParseJevResponse(const Request& request,
 // A high-confidence choice is accepted directly. A moderately confident
 // choice is accepted only when it has a clear lead over the runner-up.
 bool IsRecommendationConfident(const Result& result);
+
+// Map the selected text from the candidate snapshot sent to Jev onto the
+// current Rime list. Reordering and additional current candidates are safe;
+// changed preedit, removed request candidates, and duplicate selected text are
+// rejected so a stale result cannot select an ambiguous candidate.
+std::optional<size_t> RemapCandidate(
+    const Result& result,
+    const std::string& current_preedit,
+    const std::vector<std::string>& current_candidates);
 
 // 与 _ScheduleJev 里“是否应该发起一次新的 Jev 请求”的判定逻辑等价，
 // 抽成不依赖 RimeContext / SessionStatus / m_jev 成员的纯函数，便于测试。

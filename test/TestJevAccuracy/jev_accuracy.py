@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,14 @@ INSTRUCTIONS = (
 )
 
 
-def is_confident(probability: float, runner_up_probability: float) -> bool:
-    return probability >= 0.60 or (
+def is_confident(
+    score_source: str, probability: float, runner_up_probability: float
+) -> bool:
+    if score_source == "missing":
+        return False
+    if probability >= 0.60:
+        return True
+    return score_source == "probabilities" and (
         runner_up_probability >= 0
         and probability >= 0.40
         and probability - runner_up_probability >= 0.10
@@ -60,17 +67,29 @@ def ask_jev(api_key: str, case: dict[str, Any], timeout: float) -> dict[str, Any
 
 
 def evaluate_case(api_key: str, case: dict[str, Any], timeout: float) -> dict[str, Any]:
+    started = time.monotonic()
     answer = ask_jev(api_key, case, timeout)
+    elapsed_ms = round((time.monotonic() - started) * 1000)
     choice = answer["choice"]
     candidate_index = int(choice[1:])
     selected = case["candidates"][candidate_index]
     probabilities = answer.get("probabilities", {})
-    probability = float(probabilities.get(choice, answer.get("confidence", 0)))
-    runner_up = max(
-        (float(value) for key, value in probabilities.items() if key != choice),
-        default=-1,
-    )
-    confident = is_confident(probability, runner_up)
+    if choice in probabilities:
+        score_source = "probabilities"
+        probability = float(probabilities[choice])
+        runner_up = max(
+            (float(value) for key, value in probabilities.items() if key != choice),
+            default=-1,
+        )
+    elif "confidence" in answer:
+        score_source = "confidence"
+        probability = float(answer["confidence"])
+        runner_up = -1
+    else:
+        score_source = "missing"
+        probability = 0
+        runner_up = -1
+    confident = is_confident(score_source, probability, runner_up)
     correct = selected == case["expected"]
     return {
         "id": case["id"],
@@ -81,7 +100,56 @@ def evaluate_case(api_key: str, case: dict[str, Any], timeout: float) -> dict[st
         "effective_correct": correct and confident,
         "probability": probability,
         "runner_up_probability": runner_up,
+        "score_source": score_source,
+        "elapsed_ms": elapsed_ms,
     }
+
+
+def summarize_source(results: list[dict[str, Any]]) -> dict[str, Any]:
+    applied = [result for result in results if result["confident"]]
+    correct = sum(result["correct"] for result in results)
+    applied_correct = sum(result["correct"] for result in applied)
+    return {
+        "count": len(results),
+        "top1_correct": correct,
+        "top1_accuracy": correct / len(results) if results else 0,
+        "applied": len(applied),
+        "coverage": len(applied) / len(results) if results else 0,
+        "applied_correct": applied_correct,
+        "applied_precision": applied_correct / len(applied) if applied else 0,
+    }
+
+
+def threshold_sweep(results: list[dict[str, Any]]) -> dict[str, Any]:
+    calibration: dict[str, Any] = {}
+    for source in ("probabilities", "confidence", "missing"):
+        source_results = [
+            result for result in results if result["score_source"] == source
+        ]
+        if not source_results:
+            continue
+        points = []
+        for step in range(21):
+            threshold = step / 20
+            accepted = [
+                result
+                for result in source_results
+                if result["probability"] >= threshold
+            ]
+            accepted_correct = sum(result["correct"] for result in accepted)
+            points.append(
+                {
+                    "threshold": threshold,
+                    "accepted": len(accepted),
+                    "coverage": len(accepted) / len(source_results),
+                    "accepted_correct": accepted_correct,
+                    "precision": (
+                        accepted_correct / len(accepted) if accepted else None
+                    ),
+                }
+            )
+        calibration[source] = points
+    return calibration
 
 
 def main() -> int:
@@ -117,12 +185,21 @@ def main() -> int:
             print(
                 f"{mark} {result['id']}: expected={result['expected']} "
                 f"selected={result['selected']} probability={result['probability']:.2f} "
-                f"runner_up={result['runner_up_probability']:.2f} {applied}"
+                f"runner_up={result['runner_up_probability']:.2f} "
+                f"source={result['score_source']} elapsed={result['elapsed_ms']}ms "
+                f"{applied}"
             )
 
     completed = [result for result in results if "error" not in result]
     correct = sum(result["correct"] for result in completed)
     effective_correct = sum(result["effective_correct"] for result in completed)
+    by_score_source = {
+        source: summarize_source(
+            [result for result in completed if result["score_source"] == source]
+        )
+        for source in ("probabilities", "confidence", "missing")
+        if any(result["score_source"] == source for result in completed)
+    }
     summary = {
         "total": len(cases),
         "completed": len(completed),
@@ -131,10 +208,16 @@ def main() -> int:
         "top1_accuracy": correct / len(completed) if completed else 0,
         "effective_correct": effective_correct,
         "effective_accuracy": effective_correct / len(completed) if completed else 0,
+        "by_score_source": by_score_source,
+        "threshold_sweep": threshold_sweep(completed),
         "results": results,
     }
-    print(json.dumps({key: value for key, value in summary.items() if key != "results"},
-                     ensure_ascii=False, indent=2))
+    console_summary = {
+        key: value
+        for key, value in summary.items()
+        if key not in ("results", "threshold_sweep")
+    }
+    print(json.dumps(console_summary, ensure_ascii=False, indent=2))
     if args.output:
         args.output.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2) + "\n",

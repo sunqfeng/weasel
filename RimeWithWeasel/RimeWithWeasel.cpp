@@ -841,7 +841,8 @@ void RimeWithWeaselHandler::_StartJev() {
                     << ", candidate=" << result->candidate
                     << ", probability=" << result->probability
                     << ", runner_up_probability="
-                    << result->runner_up_probability
+                    << result->runner_up_probability << ", score_source="
+                    << jev::ScoreSourceName(result->score_source)
                     << ", elapsed_ms=" << elapsed;
           state->result = std::move(result);
           result_ready = state->result_ready;
@@ -966,6 +967,7 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
     JEV_LOG() << "Jev result ignored: generation=" << result->generation
               << ", probability=" << result->probability
               << ", runner_up_probability=" << result->runner_up_probability
+              << ", score_source=" << jev::ScoreSourceName(result->score_source)
               << ", reason=insufficient_lead";
     return false;
   }
@@ -977,28 +979,38 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
               << result->generation << ", reason=context_unavailable";
     return false;
   }
-  bool matches =
-      ctx.composition.preedit && result->preedit == ctx.composition.preedit &&
-      result->candidates.size() <= static_cast<size_t>(ctx.menu.num_candidates);
-  for (size_t i = 0; matches && i < result->candidates.size(); ++i)
-    matches = result->candidates[i] == ctx.menu.candidates[i].text;
-  if (!matches) {
+  std::vector<std::string> current_candidates;
+  if (ctx.menu.num_candidates > 0)
+    current_candidates.reserve(static_cast<size_t>(ctx.menu.num_candidates));
+  for (int i = 0; i < ctx.menu.num_candidates; ++i)
+    current_candidates.emplace_back(
+        ctx.menu.candidates[i].text ? ctx.menu.candidates[i].text : "");
+  const auto mapped_candidate = jev::RemapCandidate(
+      *result, ctx.composition.preedit ? ctx.composition.preedit : "",
+      current_candidates);
+  if (!mapped_candidate) {
     JEV_LOG() << "Jev result ignored: generation=" << result->generation
-              << ", reason=candidates_changed";
-  } else if (result->candidate != ctx.menu.highlighted_candidate_index) {
+              << ", reason=candidate_remap_failed";
+  } else if (*mapped_candidate != ctx.menu.highlighted_candidate_index) {
     rime_api->highlight_candidate_on_current_page(session_id,
-                                                  result->candidate);
+                                                  *mapped_candidate);
     JEV_LOG() << "Jev result applied: generation=" << result->generation
               << ", candidate=" << result->candidate
+              << ", mapped_candidate=" << *mapped_candidate
               << ", probability=" << result->probability
-              << ", runner_up_probability=" << result->runner_up_probability;
+              << ", runner_up_probability=" << result->runner_up_probability
+              << ", score_source="
+              << jev::ScoreSourceName(result->score_source);
     rime_api->free_context(&ctx);
     return true;
   } else {
     JEV_LOG() << "Jev result kept current candidate: generation="
               << result->generation << ", candidate=" << result->candidate
+              << ", mapped_candidate=" << *mapped_candidate
               << ", probability=" << result->probability
-              << ", runner_up_probability=" << result->runner_up_probability;
+              << ", runner_up_probability=" << result->runner_up_probability
+              << ", score_source="
+              << jev::ScoreSourceName(result->score_source);
   }
   rime_api->free_context(&ctx);
   return false;
