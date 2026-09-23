@@ -42,7 +42,6 @@ struct JevState {
   using Result = jev::Result;
 
   std::string api_key;
-  std::set<std::string> allowed_apps;
   std::mutex mutex;
   std::condition_variable changed;
   std::optional<Request> request;
@@ -735,8 +734,6 @@ void RimeWithWeaselHandler::_StartJev() {
   if (m_jev)
     return;
 #ifndef NDEBUG
-  const auto app_check = jev::ParseAllowedApps(" Notepad.exe; winword.exe ");
-  assert(app_check.count("notepad.exe") && app_check.count("winword.exe"));
   JevState::Request response_check;
   response_check.candidates = {"\xe6\xb1\x89\xe5\xad\x90",
                                "\xe6\xb1\x89\xe5\xad\x97"};
@@ -761,12 +758,9 @@ void RimeWithWeaselHandler::_StartJev() {
   const std::string enabled =
       jev::LowerAscii(GetEnvironmentUtf8(L"WEASEL_JEV_ENABLED"));
   const std::string api_key = GetEnvironmentUtf8(L"TYPESAFE_API_KEY");
-  const auto allowed_apps =
-      jev::ParseAllowedApps(GetEnvironmentUtf8(L"WEASEL_JEV_APPS"));
   const bool enabled_by_config = enabled == "1" || enabled == "true";
   JEV_LOG() << "Jev configuration checked: enabled=" << enabled_by_config
-            << ", api_key_configured=" << !api_key.empty()
-            << ", allowed_apps=" << allowed_apps.size();
+            << ", api_key_configured=" << !api_key.empty() << ", app_scope=all";
   if (!enabled_by_config) {
     JEV_LOG() << "Jev candidate recommendation disabled by configuration.";
     return;
@@ -776,15 +770,8 @@ void RimeWithWeaselHandler::_StartJev() {
                  "TYPESAFE_API_KEY is missing.";
     return;
   }
-  if (allowed_apps.empty()) {
-    JEV_LOG() << "Jev candidate recommendation not started: "
-                 "WEASEL_JEV_APPS is empty.";
-    return;
-  }
-
   auto jev = std::make_unique<JevState>();
   jev->api_key = api_key;
-  jev->allowed_apps = allowed_apps;
   jev->result_ready = [this] {
     if (_JevResultReadyCallback)
       _JevResultReadyCallback();
@@ -853,8 +840,7 @@ void RimeWithWeaselHandler::_StartJev() {
     }
   });
   m_jev = std::move(jev);
-  JEV_LOG() << "Jev candidate recommendation enabled for "
-            << m_jev->allowed_apps.size() << " allowed application(s).";
+  JEV_LOG() << "Jev candidate recommendation enabled for all applications.";
 }
 
 void RimeWithWeaselHandler::_StopJev() {
@@ -880,12 +866,6 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
     return;
 
   SessionStatus& status = get_session_status(ipc_id);
-  if (m_jev->allowed_apps.find(status.client_app) ==
-      m_jev->allowed_apps.end()) {
-    JEV_LOG() << "Jev request skipped: session=" << ipc_id
-              << ", app=" << status.client_app << ", reason=app_not_allowed";
-    return;
-  }
   if (ctx.menu.page_no != 0) {
     JEV_LOG() << "Jev request skipped: session=" << ipc_id
               << ", app=" << status.client_app
@@ -912,8 +892,8 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
     page_candidates.emplace_back(ctx.menu.candidates[i].text);
   auto decision = jev::TryScheduleJev(
       ctx.menu.page_no, ctx.menu.num_candidates, !!ctx.composition.preedit,
-      status.client_app, m_jev->allowed_apps, status.jev_history,
-      ctx.composition.preedit, page_candidates, status.jev_last_signature);
+      status.jev_history, ctx.composition.preedit, page_candidates,
+      status.jev_last_signature);
   if (!decision) {
     JEV_LOG() << "Jev request skipped: session=" << ipc_id
               << ", app=" << status.client_app << ", reason=duplicate_state";
@@ -942,10 +922,6 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   if (!m_jev)
     return false;
   const SessionStatus& status = get_session_status(ipc_id);
-  if (m_jev->allowed_apps.find(status.client_app) ==
-      m_jev->allowed_apps.end()) {
-    return false;
-  }
   std::optional<JevState::Result> result;
   {
     std::lock_guard<std::mutex> lock(m_jev->mutex);

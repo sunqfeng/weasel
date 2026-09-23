@@ -16,17 +16,16 @@
 
 输入拼音时，小狼毫会先显示 Rime 原有候选，再异步向 Jev 请求推荐。Jev 只针对第一页、至少有两个候选的输入进行判断，最多提交当前页前 10 个候选。推荐结果返回后会尝试更新高亮候选，按空格时还会再检查一次。概率达到 60% 时直接采用；在多候选场景中，概率达到 40% 且比第二名领先至少 10 个百分点时也会采用。结果尚未返回、已过期、请求失败或判断不够明确时，沿用 Rime 原有选择。
 
-功能需要 TypeSafe API Key，并且只会在你指定的应用中发送请求。启用后，请在 PowerShell 中运行：
+功能需要 TypeSafe API Key。启用后会在所有使用小狼毫输入的应用中发送请求，请在 PowerShell 中运行：
 
 ```powershell
 setx WEASEL_JEV_ENABLED "1"
 setx TYPESAFE_API_KEY "你的 TypeSafe API Key"
-setx WEASEL_JEV_APPS "notepad.exe,winword.exe"
 ```
 
-`WEASEL_JEV_APPS` 是必填的应用白名单，可用逗号或分号分隔程序名。建议先只填写 `notepad.exe` 进行测试。`setx` 写入的是后续进程使用的用户环境变量；设置完成后，需要让小狼毫服务在新环境中重新启动，必要时退出并重新登录 Windows。
+不再需要设置 `WEASEL_JEV_APPS`。旧系统中已经存在的该环境变量会被忽略。`setx` 写入的是后续进程使用的用户环境变量；设置完成后，需要让小狼毫服务在新环境中重新启动，必要时退出并重新登录 Windows。
 
-对于白名单中的应用，请求会发往 `https://api.typesafe.ai/v1/systemone`，内容包括最多 128 个最近提交的输入字符、当前预编辑文本和候选词。输入区域失去焦点后，本地保存的这段输入上下文会被清除。请只把你愿意发送这些内容的应用加入白名单。
+在所有应用中，请求都会发往 `https://api.typesafe.ai/v1/systemone`，内容包括最多 128 个最近提交的输入字符、当前预编辑文本和候选词。输入区域失去焦点后，本地保存的这段输入上下文会被清除。
 
 关闭功能可运行 `setx WEASEL_JEV_ENABLED "0"`，随后重新启动小狼毫服务。环境变量中的 API Key 不会因此自动删除。
 

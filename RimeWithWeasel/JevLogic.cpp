@@ -27,28 +27,6 @@ std::string LowerAscii(std::string value) {
   return value;
 }
 
-std::set<std::string> ParseAllowedApps(const std::string& value) {
-  std::set<std::string> apps;
-  std::string app;
-  const auto add = [&]() {
-    app.erase(0, app.find_first_not_of(" \t"));
-    const auto end = app.find_last_not_of(" \t");
-    if (end != std::string::npos)
-      app.erase(end + 1);
-    if (!app.empty())
-      apps.insert(LowerAscii(app));
-    app.clear();
-  };
-  for (char c : value) {
-    if (c == ',' || c == ';')
-      add();
-    else
-      app.push_back(c);
-  }
-  add();
-  return apps;
-}
-
 std::optional<Result> ParseJevResponse(const Request& request,
                                        const std::string& json) {
   try {
@@ -144,18 +122,11 @@ std::optional<ScheduleDecision> TryScheduleJev(
     int page_no,
     int num_candidates,
     bool has_preedit,
-    const std::string& client_app,
-    const std::set<std::string>& allowed_apps,
     const std::string& context,
     const std::string& preedit,
     const std::vector<std::string>& page_candidates,
     const std::string& previous_signature) {
   if (page_no != 0 || num_candidates < 2 || !has_preedit)
-    return std::nullopt;
-
-  // 原实现依赖调用方（_ReadClientInfo）已经把 client_app 转成小写；
-  // 这里额外做一次防御性折叠，避免调用方大小写处理被改动时静默失效。
-  if (allowed_apps.find(LowerAscii(client_app)) == allowed_apps.end())
     return std::nullopt;
 
   ScheduleDecision decision;

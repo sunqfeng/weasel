@@ -7,7 +7,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -43,9 +42,6 @@ const char* ScoreSourceName(ScoreSource source);
 // 等价于原 LowerAscii：仅做 ASCII 范围的大小写折叠。
 std::string LowerAscii(std::string value);
 
-// 等价于原 ParseAllowedApps：按逗号/分号切分、去首尾空白、转小写、去空项。
-std::set<std::string> ParseAllowedApps(const std::string& value);
-
 // 等价于原 ParseJevResponse：解析 Jev API 返回的 JSON。
 // 失败（JSON 格式错误 / choice 字段缺失或格式非法 / 候选下标越界）时返回
 // std::nullopt，调用方应视为“本次不采用 Jev 结果”，而不是异常/崩溃。
@@ -68,8 +64,7 @@ std::optional<size_t> RemapCandidate(
 // 与 _ScheduleJev 里“是否应该发起一次新的 Jev 请求”的判定逻辑等价，
 // 抽成不依赖 RimeContext / SessionStatus / m_jev 成员的纯函数，便于测试。
 //
-// client_app 可以保留原始大小写；函数在匹配 allowed_apps 前会做 ASCII
-// 小写折叠。previous_signature 用于阻止相同上下文、拼音和候选重复请求。
+// previous_signature 用于阻止相同上下文、拼音和候选重复请求。
 //
 // 返回值：
 //   若应发起新请求，返回构造好的 Request（不含 generation，调用方在加锁后自行
@@ -86,8 +81,6 @@ std::optional<ScheduleDecision> TryScheduleJev(
     int page_no,
     int num_candidates,
     bool has_preedit,
-    const std::string& client_app,
-    const std::set<std::string>& allowed_apps,
     const std::string& context,
     const std::string& preedit,
     const std::vector<std::string>& page_candidates,

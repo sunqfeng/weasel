@@ -12,7 +12,6 @@
 
 using jev::IsRecommendationConfident;
 using jev::LowerAscii;
-using jev::ParseAllowedApps;
 using jev::ParseJevResponse;
 using jev::RemapCandidate;
 using jev::Request;
@@ -26,39 +25,6 @@ void test_lower_ascii_basic() {
   BOOST_TEST(LowerAscii("Notepad.EXE") == "notepad.exe");
   BOOST_TEST(LowerAscii("") == "");
   BOOST_TEST(LowerAscii("already-lower") == "already-lower");
-}
-
-// ---------- ParseAllowedApps ----------
-
-void test_parse_allowed_apps_basic() {
-  auto apps = ParseAllowedApps(" Notepad.exe; winword.exe ");
-  BOOST_TEST(apps.count("notepad.exe") == 1);
-  BOOST_TEST(apps.count("winword.exe") == 1);
-  BOOST_TEST(apps.size() == 2u);
-}
-
-void test_parse_allowed_apps_comma_and_semicolon_mixed() {
-  auto apps = ParseAllowedApps("a.exe,b.exe;c.exe");
-  BOOST_TEST(apps.size() == 3u);
-  BOOST_TEST(apps.count("a.exe") == 1);
-  BOOST_TEST(apps.count("b.exe") == 1);
-  BOOST_TEST(apps.count("c.exe") == 1);
-}
-
-void test_parse_allowed_apps_empty_and_whitespace_only() {
-  BOOST_TEST(ParseAllowedApps("").empty());
-  BOOST_TEST(ParseAllowedApps("   ").empty());
-  // 连续分隔符 / 首尾分隔符产生的空项应被丢弃，而不是插入空字符串。
-  auto apps = ParseAllowedApps(";, a.exe ,,; ");
-  BOOST_TEST(apps.size() == 1u);
-  BOOST_TEST(apps.count("a.exe") == 1);
-}
-
-void test_parse_allowed_apps_dedup_case_insensitive() {
-  // 大小写不同但实际是同一个程序名，应该折叠成一项。
-  auto apps = ParseAllowedApps("Notepad.exe,NOTEPAD.EXE,notepad.exe");
-  BOOST_TEST(apps.size() == 1u);
-  BOOST_TEST(apps.count("notepad.exe") == 1);
 }
 
 // ---------- ParseJevResponse ----------
@@ -248,68 +214,56 @@ void test_parse_response_empty_candidate_list_always_out_of_range() {
 // ---------- TryScheduleJev ----------
 
 void test_schedule_rejects_when_not_first_page() {
-  auto decision = TryScheduleJev(/*page_no=*/1, /*num_candidates=*/5,
-                                 /*has_preedit=*/true, "notepad.exe",
-                                 {"notepad.exe"}, "ctx", "pe", {"a", "b"}, "");
+  auto decision =
+      TryScheduleJev(/*page_no=*/1, /*num_candidates=*/5,
+                     /*has_preedit=*/true, "ctx", "pe", {"a", "b"}, "");
   BOOST_TEST(!decision.has_value());
 }
 
 void test_schedule_rejects_when_fewer_than_two_candidates() {
-  auto decision = TryScheduleJev(0, /*num_candidates=*/1, true, "notepad.exe",
-                                 {"notepad.exe"}, "ctx", "pe", {"a"}, "");
+  auto decision =
+      TryScheduleJev(0, /*num_candidates=*/1, true, "ctx", "pe", {"a"}, "");
   BOOST_TEST(!decision.has_value());
 }
 
 void test_schedule_rejects_when_no_preedit() {
-  auto decision = TryScheduleJev(0, 5, /*has_preedit=*/false, "notepad.exe",
-                                 {"notepad.exe"}, "ctx", "pe", {"a", "b"}, "");
+  auto decision =
+      TryScheduleJev(0, 5, /*has_preedit=*/false, "ctx", "pe", {"a", "b"}, "");
   BOOST_TEST(!decision.has_value());
 }
 
-void test_schedule_rejects_when_app_not_whitelisted() {
-  auto decision = TryScheduleJev(0, 5, true, "chrome.exe", {"notepad.exe"},
-                                 "ctx", "pe", {"a", "b"}, "");
-  BOOST_TEST(!decision.has_value());
-}
-
-void test_schedule_accepts_case_insensitive_app_match() {
-  // 即便调用方传入的 client_app
-  // 大小写与白名单不同（防御性场景），也应正确匹配。
-  auto decision = TryScheduleJev(0, 5, true, "NOTEPAD.EXE", {"notepad.exe"},
-                                 "ctx", "pe", {"a", "b"}, "");
+void test_schedule_has_no_application_restriction() {
+  auto decision = TryScheduleJev(0, 5, true, "ctx", "pe", {"a", "b"}, "");
   BOOST_ASSERT(decision.has_value());
   BOOST_TEST(decision->request.candidates.size() == 2u);
 }
 
 void test_schedule_dedups_identical_signature() {
-  auto first = TryScheduleJev(0, 5, true, "notepad.exe", {"notepad.exe"}, "ctx",
-                              "pe", {"a", "b"}, "");
+  auto first = TryScheduleJev(0, 5, true, "ctx", "pe", {"a", "b"}, "");
   BOOST_ASSERT(first.has_value());
   // 用上一次返回的 signature 作为 previous_signature 再请求一次，应被去重。
-  auto second = TryScheduleJev(0, 5, true, "notepad.exe", {"notepad.exe"},
-                               "ctx", "pe", {"a", "b"}, first->new_signature);
+  auto second =
+      TryScheduleJev(0, 5, true, "ctx", "pe", {"a", "b"}, first->new_signature);
   BOOST_TEST(!second.has_value());
 }
 
 void test_schedule_reschedules_when_candidates_change() {
-  auto first = TryScheduleJev(0, 5, true, "notepad.exe", {"notepad.exe"}, "ctx",
-                              "pe", {"a", "b"}, "");
+  auto first = TryScheduleJev(0, 5, true, "ctx", "pe", {"a", "b"}, "");
   BOOST_ASSERT(first.has_value());
   // 候选内容变化（哪怕只是顺序变化）应触发新的请求，而不是被去重逻辑吞掉。
-  auto second = TryScheduleJev(0, 5, true, "notepad.exe", {"notepad.exe"},
-                               "ctx", "pe", {"b", "a"}, first->new_signature);
+  auto second =
+      TryScheduleJev(0, 5, true, "ctx", "pe", {"b", "a"}, first->new_signature);
   BOOST_ASSERT(second.has_value());
   BOOST_TEST(second->new_signature != first->new_signature);
 }
 
 void test_schedule_reschedules_when_context_changes() {
-  auto first = TryScheduleJev(0, 5, true, "notepad.exe", {"notepad.exe"},
-                              "ctx1", "pe", {"a", "b"}, "");
+  auto first = TryScheduleJev(0, 5, true, "ctx1", "pe", {"a", "b"}, "");
   BOOST_ASSERT(first.has_value());
   // 只有 committed context 变了，preedit/candidates 都没变，也应该触发新请求，
   // 因为 signature 是 context+preedit+candidates 的拼接。
-  auto second = TryScheduleJev(0, 5, true, "notepad.exe", {"notepad.exe"},
-                               "ctx2", "pe", {"a", "b"}, first->new_signature);
+  auto second = TryScheduleJev(0, 5, true, "ctx2", "pe", {"a", "b"},
+                               first->new_signature);
   BOOST_ASSERT(second.has_value());
   BOOST_TEST(second->new_signature != first->new_signature);
 }
@@ -318,8 +272,7 @@ void test_schedule_truncates_to_first_ten_candidates() {
   std::vector<std::string> many;
   for (int i = 0; i < 15; ++i)
     many.push_back("cand" + std::to_string(i));
-  auto decision = TryScheduleJev(0, 15, true, "notepad.exe", {"notepad.exe"},
-                                 "ctx", "pe", many, "");
+  auto decision = TryScheduleJev(0, 15, true, "ctx", "pe", many, "");
   BOOST_ASSERT(decision.has_value());
   BOOST_TEST(decision->request.candidates.size() == 10u);
   BOOST_TEST(decision->request.candidates.front() == "cand0");
@@ -327,8 +280,8 @@ void test_schedule_truncates_to_first_ten_candidates() {
 }
 
 void test_schedule_respects_reported_candidate_count() {
-  auto decision = TryScheduleJev(0, 2, true, "notepad.exe", {"notepad.exe"},
-                                 "ctx", "pe", {"a", "b", "stale"}, "");
+  auto decision =
+      TryScheduleJev(0, 2, true, "ctx", "pe", {"a", "b", "stale"}, "");
   BOOST_ASSERT(decision.has_value());
   BOOST_TEST(decision->request.candidates.size() == 2u);
 }
@@ -338,19 +291,13 @@ void test_schedule_respects_reported_candidate_count() {
 // 目前的输入源（Rime 候选文本）正常不会包含换行，这里只是记录这个隐含假设，
 // 便于以后候选来源变化时有据可查，而不是断言一个当前必然成立的具体值。
 void test_schedule_signature_assumption_no_newline_in_candidates() {
-  auto decision = TryScheduleJev(0, 2, true, "notepad.exe", {"notepad.exe"},
-                                 "ctx", "pe", {"a", "b"}, "");
+  auto decision = TryScheduleJev(0, 2, true, "ctx", "pe", {"a", "b"}, "");
   BOOST_ASSERT(decision.has_value());
   BOOST_TEST(decision->new_signature.find('\n') != std::string::npos);
 }
 
 int main() {
   test_lower_ascii_basic();
-
-  test_parse_allowed_apps_basic();
-  test_parse_allowed_apps_comma_and_semicolon_mixed();
-  test_parse_allowed_apps_empty_and_whitespace_only();
-  test_parse_allowed_apps_dedup_case_insensitive();
 
   test_parse_response_normal_with_probabilities();
   test_parse_response_falls_back_to_confidence();
@@ -376,8 +323,7 @@ int main() {
   test_schedule_rejects_when_not_first_page();
   test_schedule_rejects_when_fewer_than_two_candidates();
   test_schedule_rejects_when_no_preedit();
-  test_schedule_rejects_when_app_not_whitelisted();
-  test_schedule_accepts_case_insensitive_app_match();
+  test_schedule_has_no_application_restriction();
   test_schedule_dedups_identical_signature();
   test_schedule_reschedules_when_candidates_change();
   test_schedule_reschedules_when_context_changes();
