@@ -1,134 +1,49 @@
-﻿【小狼毫】輸入法
-================
+# 小狼毫 Weasel · Jev 候选推荐实验版
 
-基於 中州韻輸入法引擎／Rime Input Method Engine 等開源技術
+这是基于 [Rime 小狼毫（Weasel）](https://github.com/rime/weasel) 的个人 fork，面向 Windows。项目保留小狼毫原有的输入方案与配置方式，并增加了可选的 [TypeSafe Jev](https://typesafe.ai/) 候选推荐功能。Jev 功能仍处于实验阶段，默认关闭。
 
-式恕堂 版權所無
+本仓库的安装包和问题反馈请使用本项目链接；小狼毫及 Rime 的通用使用资料仍以[上游项目](https://github.com/rime/weasel)为准。
 
-[![Download](https://img.shields.io/github/v/release/rime/weasel)](https://github.com/rime/weasel/releases/latest)
-[![Build status](https://github.com/rime/weasel/actions/workflows/commit-ci.yml/badge.svg)](https://github.com/rime/weasel/actions/workflows/commit-ci.yml)
-[![GitHub Tag](https://img.shields.io/github/tag/rime/weasel.svg)](https://github.com/rime/weasel)
+## 下载与安装
 
-授權條款：GPLv3
+在本项目的 [Releases 页面](https://github.com/sunqfeng/weasel/releases)下载 `weasel` 开头的 `.exe` 安装包。目前提供的是**预发布测试版**。安装包未进行代码签名，Windows SmartScreen 可能显示提示；请核对下载来源后再决定是否运行。
 
-項目主頁：https://rime.im
+小狼毫适用于 Windows 8.1 至 Windows 11。安装时可选择输入语言；安装完成后，从系统输入法列表切换到“小狼毫”即可使用。已有 Rime 配置通常位于 `%AppData%\Rime`，安装测试版前建议先备份该目录。
 
-您可能還需要 RIME 用於其他操作系統的發行版：
+即使不启用 Jev，本项目仍可按普通小狼毫使用。
 
-  * ibus-rime、fcitx5-rime 或 fcitx-rime 用於 Linux
-  * 【鼠鬚管】用於 macOS （64位）
+## Jev 候选推荐
 
-安裝輸入法
-----------
+输入拼音时，小狼毫会先显示 Rime 原有候选，再异步向 Jev 请求推荐。Jev 只针对第一页、至少有两个候选的输入进行判断，最多提交当前页前 10 个候选。推荐结果会在**按空格选词时**尝试应用；如果结果尚未返回、已过期、请求失败，或者所选候选的概率低于 60%，则沿用 Rime 原有选择。因此，候选窗口不会在网络响应到达时立即改选，高延迟时也可能赶不上当前这次空格选词。
 
-本品適用於 Windows 8.1 ~ Windows 11
-
-初次安裝時，安裝程序將顯示「安裝選項」對話框。
-
-若要將【小狼毫】註冊到繁體中文（臺灣）鍵盤佈局，請在「輸入語言」欄選擇「中文（臺灣）」，再點擊「安裝」按鈕。
-
-安裝完成後，仍可由開始菜單打開「安裝選項」更改輸入語言。
-
-使用輸入法
-----------
-
-選取輸入法指示器菜單裏的【中】字樣圖標，開始用小狼毫寫字。
-
-可通過快捷鍵 <kbd>Ctrl+`</kbd> 或 <kbd>F4</kbd> 呼出方案選單、切換輸入方式。
-
-定製輸入法
-----------
-
-通過 開始菜單 » 小狼毫輸入法 訪問設定工具及常用位置。
-
-用戶詞庫、配置文件位於 `%AppData%\Rime`，可通過菜單中的「用戶文件夾」打開。高水平玩家調教 Rime 輸入法常會用到。
-
-修改詞庫、配置文件後，須「重新部署」方可生效。
-
-定製 Rime 的方法，請參考 Wiki [《定製指南》](https://github.com/rime/home/wiki/CustomizationGuide)。如需定製 Weasel 獨有的樣式和行為，請參考本倉庫 [Wiki 頁面](https://github.com/rime/weasel/wiki)。
-
-Jev 候選推薦（實驗性）
-----------------------
-
-本分支可使用 TypeSafe Jev 根據最近輸入的文字、當前拼音和 Rime 候選，異步推薦並高亮最合適的候選。Rime 候選會立即顯示，網絡請求不阻塞按鍵處理；請求失敗、結果過期或推薦概率低於 60% 時保持 Rime 原有選擇。
-
-此功能默認關閉。啟用前需在啟動小狼毫的用戶環境中設置：
+功能需要 TypeSafe API Key，并且只会在你指定的应用中发送请求。启用后，请在 PowerShell 中运行：
 
 ```powershell
-setx WEASEL_JEV_ENABLED 1
+setx WEASEL_JEV_ENABLED "1"
 setx TYPESAFE_API_KEY "你的 TypeSafe API Key"
 setx WEASEL_JEV_APPS "notepad.exe,winword.exe"
 ```
 
-`WEASEL_JEV_APPS` 是必填的應用白名單；只有名單中的程序會向 `https://api.typesafe.ai/v1/systemone` 發送最多 128 個最近輸入字符、當前拼音和當頁候選。焦點離開輸入區後，本地上下文會被清除。環境變量生效後需重啟小狼毫服務。
+`WEASEL_JEV_APPS` 是必填的应用白名单，可用逗号或分号分隔程序名。建议先只填写 `notepad.exe` 进行测试。`setx` 写入的是后续进程使用的用户环境变量；设置完成后，需要让小狼毫服务在新环境中重新启动，必要时退出并重新登录 Windows。
 
-本分支構建成功後，可在 [Releases](https://github.com/sunqfeng/weasel/releases) 下載名稱以 `weasel` 開頭的實驗版安裝程序。安裝程序未簽名，Windows SmartScreen 可能顯示安全提示。
+对于白名单中的应用，请求会发往 `https://api.typesafe.ai/v1/systemone`，内容包括最多 128 个最近提交的输入字符、当前预编辑文本和候选词。输入区域失去焦点后，本地保存的这段输入上下文会被清除。请只把你愿意发送这些内容的应用加入白名单。
 
-致謝
-----
+关闭功能可运行 `setx WEASEL_JEV_ENABLED "0"`，随后重新启动小狼毫服务。环境变量中的 API Key 不会因此自动删除。
 
-### 輸入方案設計：
+## 小狼毫基本使用
 
-  * 【朙月拼音】系列及【八股文】詞典
-    - 部分數據來源於 CC-CEDICT、Android 拼音、新酷音、opencc 等開源項目
-    - 維護者：佛振、瑾昀
-  * 【注音／地球拼音】
-    - 維護者：佛振、瑾昀
-  * 【倉頡五代】
-    - 發明人：朱邦復先生
-    - 碼表源自 www.chinesecj.com
-    - 構詞碼表作者：惜緣
+- 使用 <kbd>Ctrl</kbd> + <kbd>`</kbd> 或 <kbd>F4</kbd> 打开输入方案菜单。
+- 用户词库与配置文件位于 `%AppData%\Rime`。修改后需要执行“重新部署”。
+- 输入方案的自定义方法参见 [Rime 定制指南](https://github.com/rime/home/wiki/CustomizationGuide)；小狼毫的样式与行为设置参见[上游 Wiki](https://github.com/rime/weasel/wiki)。
 
-  【五笔】【粵拼】【上海／蘇州吳語】【中古漢語拼音】【國際音標】等衆多方案
-  不再以安裝包預裝形式提供。可由 <https://github.com/rime/plum> 下載安裝。
+## 从源码构建
 
-### 程序設計：
+本项目沿用上游小狼毫的 Windows 构建流程，具体依赖和命令见 [INSTALL.md](INSTALL.md)。GitHub Actions 会执行格式检查，并使用 MSBuild 与 xmake 构建；通过构建不代表 Jev 功能已经完成真实 API 的端到端验证。
 
-  * [佛振](https://github.com/lotem)
-  * [鄒旭](https://github.com/zouxu09)
-  * [Xiangyan Sun](https://github.com/wishstudio)
-  * [Prcuvu](https://github.com/Prcuvu)
-  * [nameoverflow](https://github.com/nameoverflow)
-  * [fxliang](https://github.com/fxliang)
-  * [Azuk 443](https://github.com/determ1ne)
+## 问题反馈
 
-  查看更多 [代碼貢獻者](https://github.com/rime/weasel/graphs/contributors)
+与本 fork 的 Jev 功能、测试版安装包有关的问题，请在[本项目 Issues](https://github.com/sunqfeng/weasel/issues)反馈。小狼毫本体的问题可参考[上游 Issues](https://github.com/rime/weasel/issues)。反馈时请说明 Windows 版本、小狼毫版本、使用的输入方案及复现步骤；不要公开 API Key 或包含敏感输入的日志。
 
-### 美術：
+## 上游与许可
 
-  * 圖標設計／[Patricivs](https://github.com/Patricivs)
-  * 配色方案／Aben、P1461、Patricivs、skoj、佛振、五磅兔
-
-### 本品引用了以下開源軟件：
-
-  * [Boost C++ Libraries](http://www.boost.org/) (Boost Software License)
-  * [curl](https://curl.haxx.se/) (MIT/X derivate license)
-  * [google-glog](https://github.com/google/glog) (BSD 3-Clause License)
-  * [Google Test](https://github.com/google/googletest) (BSD 3-Clause License)
-  * [LevelDB](https://github.com/google/leveldb) (BSD 3-Clause License)
-  * [librime](https://github.com/rime/librime) (BSD 3-Clause License)
-  * [marisa-trie](https://github.com/s-yata/marisa-trie) (BSD 2-Clause License, LGPL 2.1)
-  * [OpenCC / 開放中文轉換](https://github.com/BYVoid/OpenCC) (Apache License 2.0)
-  * [plum](https://github.com/rime/plum) (GNU Lesser General Public License v3.0)
-  * [WinSparkle](https://github.com/vslavik/winsparkle) (MIT License)
-  * [yaml-cpp](https://github.com/jbeder/yaml-cpp) (MIT License)
-  * [7-Zip](https://www.7-zip.org) (GNU LGPLv2.1+ with unRAR restriction)
-
-問題與反饋
-----------
-
-發現程序有 bug，請到 GitHub 反饋
-<https://github.com/rime/weasel/issues>
-
-歡迎提交 pull request
-<https://github.com/rime/weasel/pulls>
-
-Rime 輸入法（不限於 Windows 平臺）功能、使用方法與配置相關的問題，請反饋到
-<https://github.com/rime/home/issues>
-
-聯繫方式
---------
-
-技術交流，歡迎光臨 [Rime 代碼之家](https://github.com/rime/home)，或致信 Rime 開發者 <rimeime@gmail.com>
-
-謝謝！
+本项目基于 [rime/weasel](https://github.com/rime/weasel)，输入引擎、输入方案、界面和大量依赖均来自 Rime 社区及上游贡献者。感谢[上游贡献者](https://github.com/rime/weasel/graphs/contributors)。本项目沿用 [GNU GPLv3 许可](LICENSE.txt)；各第三方组件仍遵循其各自的许可证。
