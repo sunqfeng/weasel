@@ -12,6 +12,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -131,7 +132,13 @@ std::optional<JevState::Result> ParseJevResponse(
         "answers.candidate.probabilities." + choice,
         response.get<double>("answers.candidate.confidence", 0));
     return result;
+  } catch (const std::exception& error) {
+    LOG(WARNING) << "Jev response parse failed: generation="
+                 << request.generation << ", error=" << error.what();
+    return std::nullopt;
   } catch (...) {
+    LOG(WARNING) << "Jev response parse failed: generation="
+                 << request.generation << ", error=unknown";
     return std::nullopt;
   }
 }
@@ -167,27 +174,43 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   WinHttpHandle session(
       WinHttpOpen(L"Weasel-Jev/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-  if (!session)
+  if (!session) {
+    LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                 << ", stage=WinHttpOpen, error=" << GetLastError();
     return std::nullopt;
+  }
   WinHttpSetTimeouts(session, 200, 200, 800, 800);
 
   WinHttpHandle connection(WinHttpConnect(session, L"api.typesafe.ai",
                                           INTERNET_DEFAULT_HTTPS_PORT, 0));
-  if (!connection)
+  if (!connection) {
+    LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                 << ", stage=WinHttpConnect, error=" << GetLastError();
     return std::nullopt;
+  }
   WinHttpHandle http_request(WinHttpOpenRequest(
       connection, L"POST", L"/v1/systemone", nullptr, WINHTTP_NO_REFERER,
       WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
-  if (!http_request)
+  if (!http_request) {
+    LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                 << ", stage=WinHttpOpenRequest, error=" << GetLastError();
     return std::nullopt;
+  }
 
   const std::wstring headers = L"Authorization: Bearer " + u8tow(api_key) +
                                L"\r\nContent-Type: application/json\r\n";
   if (!WinHttpSendRequest(
           http_request, headers.c_str(), static_cast<DWORD>(headers.size()),
           const_cast<char*>(body.data()), static_cast<DWORD>(body.size()),
-          static_cast<DWORD>(body.size()), 0) ||
-      !WinHttpReceiveResponse(http_request, nullptr)) {
+          static_cast<DWORD>(body.size()), 0)) {
+    LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                 << ", stage=WinHttpSendRequest, error=" << GetLastError();
+    return std::nullopt;
+  }
+  if (!WinHttpReceiveResponse(http_request, nullptr)) {
+    LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                 << ", stage=WinHttpReceiveResponse, error="
+                 << GetLastError();
     return std::nullopt;
   }
 
@@ -196,28 +219,56 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   if (!WinHttpQueryHeaders(
           http_request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
           WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
-          WINHTTP_NO_HEADER_INDEX) ||
-      status < 200 || status >= 300) {
+          WINHTTP_NO_HEADER_INDEX)) {
+    LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                 << ", stage=WinHttpQueryHeaders, error=" << GetLastError();
+    return std::nullopt;
+  }
+  if (status < 200 || status >= 300) {
+    LOG(WARNING) << "Jev request rejected: generation=" << request.generation
+                 << ", http_status=" << status;
     return std::nullopt;
   }
 
   std::string response;
   for (;;) {
     DWORD available = 0;
-    if (!WinHttpQueryDataAvailable(http_request, &available) || !available)
-      break;
-    if (response.size() + available > 1024 * 1024)
+    if (!WinHttpQueryDataAvailable(http_request, &available)) {
+      LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                   << ", stage=WinHttpQueryDataAvailable, error="
+                   << GetLastError();
       return std::nullopt;
+    }
+    if (!available)
+      break;
+    if (response.size() + available > 1024 * 1024) {
+      LOG(WARNING) << "Jev response rejected: generation="
+                   << request.generation << ", reason=response_too_large";
+      return std::nullopt;
+    }
     const size_t offset = response.size();
     response.resize(offset + available);
     DWORD read = 0;
     if (!WinHttpReadData(http_request, response.data() + offset, available,
-                         &read) ||
-        !read)
+                         &read)) {
+      LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                   << ", stage=WinHttpReadData, error=" << GetLastError();
       return std::nullopt;
+    }
+    if (!read) {
+      LOG(WARNING) << "Jev request failed: generation=" << request.generation
+                   << ", stage=WinHttpReadData, reason=empty_read";
+      return std::nullopt;
+    }
     response.resize(offset + read);
   }
-  return ParseJevResponse(request, response);
+  auto result = ParseJevResponse(request, response);
+  if (!result) {
+    LOG(WARNING) << "Jev response rejected: generation="
+                 << request.generation << ", http_status=" << status
+                 << ", response_bytes=" << response.size();
+  }
+  return result;
 }
 
 }  // namespace
@@ -718,8 +769,23 @@ void RimeWithWeaselHandler::_StartJev() {
   const std::string api_key = GetEnvironmentUtf8(L"TYPESAFE_API_KEY");
   const auto allowed_apps =
       ParseAllowedApps(GetEnvironmentUtf8(L"WEASEL_JEV_APPS"));
-  if ((enabled != "1" && enabled != "true") || api_key.empty() ||
-      allowed_apps.empty()) {
+  const bool enabled_by_config = enabled == "1" || enabled == "true";
+  LOG(WARNING) << "Jev configuration checked: enabled=" << enabled_by_config
+               << ", api_key_configured=" << !api_key.empty()
+               << ", allowed_apps=" << allowed_apps.size();
+  if (!enabled_by_config) {
+    LOG(WARNING)
+        << "Jev candidate recommendation disabled by configuration.";
+    return;
+  }
+  if (api_key.empty()) {
+    LOG(WARNING) << "Jev candidate recommendation not started: "
+                    "TYPESAFE_API_KEY is missing.";
+    return;
+  }
+  if (allowed_apps.empty()) {
+    LOG(WARNING) << "Jev candidate recommendation not started: "
+                    "WEASEL_JEV_APPS is empty.";
     return;
   }
 
@@ -745,22 +811,51 @@ void RimeWithWeaselHandler::_StartJev() {
         state->request.reset();
       }
 
+      const auto started = std::chrono::steady_clock::now();
+      LOG(WARNING) << "Jev request started: generation=" << request.generation
+                   << ", session=" << request.session
+                   << ", candidates=" << request.candidates.size()
+                   << ", context_bytes=" << request.context.size()
+                   << ", preedit_bytes=" << request.preedit.size();
       auto result = AskJev(state->api_key, request);
-      if (result) {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (!state->stopping && request.generation == state->generation)
-          state->result = std::move(result);
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+      if (!result) {
+        LOG(WARNING) << "Jev request completed without a usable result: "
+                     << "generation=" << request.generation
+                     << ", elapsed_ms=" << elapsed;
+        continue;
+      }
+
+      std::lock_guard<std::mutex> lock(state->mutex);
+      if (state->stopping) {
+        LOG(WARNING) << "Jev result discarded: generation="
+                     << request.generation
+                     << ", reason=stopping, elapsed_ms=" << elapsed;
+      } else if (request.generation != state->generation) {
+        LOG(WARNING) << "Jev result discarded: generation="
+                     << request.generation
+                     << ", current_generation=" << state->generation
+                     << ", reason=stale, elapsed_ms=" << elapsed;
+      } else {
+        LOG(WARNING) << "Jev result ready: generation=" << request.generation
+                     << ", candidate=" << result->candidate
+                     << ", probability=" << result->probability
+                     << ", elapsed_ms=" << elapsed;
+        state->result = std::move(result);
       }
     }
   });
   m_jev = std::move(jev);
-  LOG(INFO) << "Jev candidate recommendation enabled for "
-            << m_jev->allowed_apps.size() << " allowed application(s).";
+  LOG(WARNING) << "Jev candidate recommendation enabled for "
+               << m_jev->allowed_apps.size() << " allowed application(s).";
 }
 
 void RimeWithWeaselHandler::_StopJev() {
   if (!m_jev)
     return;
+  LOG(WARNING) << "Stopping Jev candidate recommendation.";
   {
     std::lock_guard<std::mutex> lock(m_jev->mutex);
     m_jev->stopping = true;
@@ -771,18 +866,39 @@ void RimeWithWeaselHandler::_StopJev() {
   if (m_jev->worker.joinable())
     m_jev->worker.join();
   m_jev.reset();
+  LOG(WARNING) << "Jev candidate recommendation stopped.";
 }
 
 void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
                                          const RimeContext& ctx) {
-  if (!m_jev || ctx.menu.page_no != 0 || ctx.menu.num_candidates < 2 ||
-      !ctx.composition.preedit) {
+  if (!m_jev)
     return;
-  }
 
   SessionStatus& status = get_session_status(ipc_id);
   if (m_jev->allowed_apps.find(status.client_app) ==
       m_jev->allowed_apps.end()) {
+    LOG(WARNING) << "Jev request skipped: session=" << ipc_id
+                 << ", app=" << status.client_app
+                 << ", reason=app_not_allowed";
+    return;
+  }
+  if (ctx.menu.page_no != 0) {
+    LOG(WARNING) << "Jev request skipped: session=" << ipc_id
+                 << ", app=" << status.client_app
+                 << ", reason=not_first_page, page=" << ctx.menu.page_no;
+    return;
+  }
+  if (ctx.menu.num_candidates < 2) {
+    LOG(WARNING) << "Jev request skipped: session=" << ipc_id
+                 << ", app=" << status.client_app
+                 << ", reason=insufficient_candidates, candidates="
+                 << ctx.menu.num_candidates;
+    return;
+  }
+  if (!ctx.composition.preedit) {
+    LOG(WARNING) << "Jev request skipped: session=" << ipc_id
+                 << ", app=" << status.client_app
+                 << ", reason=preedit_unavailable";
     return;
   }
 
@@ -798,47 +914,87 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
     request.candidates.push_back(candidate);
     signature.append("\n").append(candidate);
   }
-  if (signature == status.jev_last_signature)
+  if (signature == status.jev_last_signature) {
+    LOG(WARNING) << "Jev request skipped: session=" << ipc_id
+                 << ", app=" << status.client_app
+                 << ", reason=duplicate_state";
     return;
+  }
   status.jev_last_signature = std::move(signature);
 
+  uint64_t generation = 0;
   {
     std::lock_guard<std::mutex> lock(m_jev->mutex);
     request.generation = ++m_jev->generation;
+    generation = request.generation;
     m_jev->request = std::move(request);
     m_jev->result.reset();
   }
+  LOG(WARNING) << "Jev request scheduled: generation=" << generation
+               << ", session=" << ipc_id << ", app=" << status.client_app
+               << ", candidates=" << candidate_count;
   m_jev->changed.notify_one();
 }
 
 void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   if (!m_jev)
     return;
+  const SessionStatus& status = get_session_status(ipc_id);
+  if (m_jev->allowed_apps.find(status.client_app) ==
+      m_jev->allowed_apps.end()) {
+    return;
+  }
   std::optional<JevState::Result> result;
   {
     std::lock_guard<std::mutex> lock(m_jev->mutex);
-    if (!m_jev->result || m_jev->result->session != ipc_id)
+    if (!m_jev->result) {
+      LOG(WARNING) << "Jev result unavailable at selection time: session="
+                   << ipc_id << ", app=" << status.client_app;
       return;
+    }
+    if (m_jev->result->session != ipc_id) {
+      LOG(WARNING) << "Jev result ignored at selection time: session="
+                   << ipc_id
+                   << ", result_session=" << m_jev->result->session
+                   << ", reason=session_mismatch";
+      return;
+    }
     result = std::move(m_jev->result);
     m_jev->result.reset();
   }
-  if (result->probability < 0.60)
+  if (result->probability < 0.60) {
+    LOG(WARNING) << "Jev result ignored at selection time: generation="
+                 << result->generation << ", probability="
+                 << result->probability << ", reason=below_threshold";
     return;
+  }
 
   RimeSessionId session_id = to_session_id(ipc_id);
   RIME_STRUCT(RimeContext, ctx);
-  if (!rime_api->get_context(session_id, &ctx))
+  if (!rime_api->get_context(session_id, &ctx)) {
+    LOG(WARNING) << "Jev result could not be applied: generation="
+                 << result->generation << ", reason=context_unavailable";
     return;
+  }
   bool matches =
       ctx.composition.preedit && result->preedit == ctx.composition.preedit &&
       result->candidates.size() <= static_cast<size_t>(ctx.menu.num_candidates);
   for (size_t i = 0; matches && i < result->candidates.size(); ++i)
     matches = result->candidates[i] == ctx.menu.candidates[i].text;
-  if (matches && result->candidate != ctx.menu.highlighted_candidate_index) {
+  if (!matches) {
+    LOG(WARNING) << "Jev result ignored at selection time: generation="
+                 << result->generation << ", reason=candidates_changed";
+  } else if (result->candidate != ctx.menu.highlighted_candidate_index) {
     rime_api->highlight_candidate_on_current_page(session_id,
                                                   result->candidate);
-    DLOG(INFO) << "Jev highlighted candidate " << result->candidate
-               << " with probability " << result->probability;
+    LOG(WARNING) << "Jev result applied: generation=" << result->generation
+                 << ", candidate=" << result->candidate
+                 << ", probability=" << result->probability;
+  } else {
+    LOG(WARNING) << "Jev result kept current candidate: generation="
+                 << result->generation
+                 << ", candidate=" << result->candidate
+                 << ", probability=" << result->probability;
   }
   rime_api->free_context(&ctx);
 }
