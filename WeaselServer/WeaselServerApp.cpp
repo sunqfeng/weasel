@@ -29,6 +29,7 @@ int WeaselServerApp::Run() {
   win_sparkle_init();
   m_ui.Create(m_server.GetHWnd());
 
+  m_handler->OnJevResultReady([this]() { m_server.NotifyJevResult(); });
   m_handler->Initialize();
   m_handler->OnUpdateUI([this]() { tray_icon.RequestRefresh(); });
 
