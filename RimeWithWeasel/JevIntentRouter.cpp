@@ -101,7 +101,7 @@ std::vector<Choice> BuildChoices(const std::vector<std::string>& candidates,
                                  const std::string& input,
                                  size_t limit) {
   std::vector<Choice> choices;
-  const size_t count = std::min(candidates.size(), limit);
+  const size_t count = (std::min)(candidates.size(), limit);
   choices.reserve(count + 1);
   for (size_t i = 0; i < count; ++i) {
     if (!candidates[i].empty())
@@ -140,7 +140,7 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
         return std::nullopt;
       if (choice.key == selected_key)
         decision.probability = probability;
-      maximum_probability = std::max(maximum_probability, probability);
+      maximum_probability = (std::max)(maximum_probability, probability);
       if (choice.kind == ChoiceKind::candidate)
         decision.ranking.push_back({choice.candidate_index, probability});
     }
