@@ -164,17 +164,15 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   boost::property_tree::write_json(output, payload, false);
   const std::string body = output.str();
 
-  WinHttpHandle session(WinHttpOpen(L"Weasel-Jev/0.1",
-                                    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                    WINHTTP_NO_PROXY_NAME,
-                                    WINHTTP_NO_PROXY_BYPASS, 0));
+  WinHttpHandle session(
+      WinHttpOpen(L"Weasel-Jev/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                  WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
   if (!session)
     return std::nullopt;
   WinHttpSetTimeouts(session, 200, 200, 800, 800);
 
-  WinHttpHandle connection(
-      WinHttpConnect(session, L"api.typesafe.ai", INTERNET_DEFAULT_HTTPS_PORT,
-                     0));
+  WinHttpHandle connection(WinHttpConnect(session, L"api.typesafe.ai",
+                                          INTERNET_DEFAULT_HTTPS_PORT, 0));
   if (!connection)
     return std::nullopt;
   WinHttpHandle http_request(WinHttpOpenRequest(
@@ -183,9 +181,8 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   if (!http_request)
     return std::nullopt;
 
-  const std::wstring headers =
-      L"Authorization: Bearer " + u8tow(api_key) +
-      L"\r\nContent-Type: application/json\r\n";
+  const std::wstring headers = L"Authorization: Bearer " + u8tow(api_key) +
+                               L"\r\nContent-Type: application/json\r\n";
   if (!WinHttpSendRequest(
           http_request, headers.c_str(), static_cast<DWORD>(headers.size()),
           const_cast<char*>(body.data()), static_cast<DWORD>(body.size()),
@@ -196,10 +193,10 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
 
   DWORD status = 0;
   DWORD status_size = sizeof(status);
-  if (!WinHttpQueryHeaders(http_request,
-                           WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                           WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
-                           WINHTTP_NO_HEADER_INDEX) ||
+  if (!WinHttpQueryHeaders(
+          http_request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+          WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+          WINHTTP_NO_HEADER_INDEX) ||
       status < 200 || status >= 300) {
     return std::nullopt;
   }
@@ -734,8 +731,8 @@ void RimeWithWeaselHandler::_StartJev() {
       JevState::Request request;
       {
         std::unique_lock<std::mutex> lock(state->mutex);
-        state->changed.wait(lock,
-                            [state] { return state->stopping || state->request; });
+        state->changed.wait(
+            lock, [state] { return state->stopping || state->request; });
         if (state->stopping)
           return;
         state->changed.wait_for(lock, std::chrono::milliseconds(60),
@@ -793,8 +790,7 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
   request.session = ipc_id;
   request.context = status.jev_history;
   request.preedit = ctx.composition.preedit;
-  const size_t candidate_count =
-      std::min<size_t>(ctx.menu.num_candidates, 10);
+  const size_t candidate_count = std::min<size_t>(ctx.menu.num_candidates, 10);
   request.candidates.reserve(candidate_count);
   std::string signature = request.context + "\n" + request.preedit;
   for (size_t i = 0; i < candidate_count; ++i) {
@@ -833,15 +829,14 @@ void RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   RIME_STRUCT(RimeContext, ctx);
   if (!rime_api->get_context(session_id, &ctx))
     return;
-  bool matches = ctx.composition.preedit &&
-                 result->preedit == ctx.composition.preedit &&
-                 result->candidates.size() <=
-                     static_cast<size_t>(ctx.menu.num_candidates);
+  bool matches =
+      ctx.composition.preedit && result->preedit == ctx.composition.preedit &&
+      result->candidates.size() <= static_cast<size_t>(ctx.menu.num_candidates);
   for (size_t i = 0; matches && i < result->candidates.size(); ++i)
     matches = result->candidates[i] == ctx.menu.candidates[i].text;
   if (matches && result->candidate != ctx.menu.highlighted_candidate_index) {
     rime_api->highlight_candidate_on_current_page(session_id,
-                                                   result->candidate);
+                                                  result->candidate);
     DLOG(INFO) << "Jev highlighted candidate " << result->candidate
                << " with probability " << result->probability;
   }
