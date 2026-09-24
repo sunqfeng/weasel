@@ -12,9 +12,15 @@
 
 即使不启用 Jev，本项目仍可按普通小狼毫使用。
 
+## 本地 Octagram 语法排序
+
+安装包内置并默认启用官方简体中文 Octagram 语法模型，用于 `luna_pinyin_simp`（朙月拼音·简化字）。它会先在本机结合已提交的上下文调整候选顺序，不需要网络，也不会上传输入内容。模型和配置来自 [lotem/rime-octagram-data](https://github.com/lotem/rime-octagram-data)，构建时锁定具体提交，避免上游模型变化导致前后测试结果不可比较。
+
+Octagram 主要改善连续语句中的候选排序，仍会受到输入方案、词典和用户词库影响。安装或升级后需要执行一次“重新部署”，部署日志中出现 `use grammar: zh-hans-t-essay-bgw` 表示模型已经加载。
+
 ## Jev 候选推荐
 
-输入拼音时，小狼毫会先显示 Rime 原有候选，再异步向 Jev 请求推荐。Jev 只针对第一页、至少有两个候选的输入进行判断，最多提交当前页前 10 个候选。推荐结果返回后会尝试更新高亮候选，按空格时还会再检查一次。概率达到 60% 时直接采用；在多候选场景中，概率达到 40% 且比第二名领先至少 10 个百分点时也会采用。结果尚未返回、已过期、请求失败或判断不够明确时，沿用 Rime 原有选择。
+输入拼音时，小狼毫会先显示经过 Rime 和 Octagram 本地排序的候选，再异步向 Jev 请求推荐。Jev 只针对第一页、至少有两个候选的输入进行判断，最多提交当前页前 10 个候选。推荐结果返回后会尝试更新高亮候选，按空格时还会再检查一次。概率达到 60% 时直接采用；在多候选场景中，概率达到 40% 且比第二名领先至少 10 个百分点时也会采用。结果尚未返回、已过期、请求失败或判断不够明确时，沿用本地选择。
 
 功能需要 TypeSafe API Key。启用后会在所有使用小狼毫输入的应用中发送请求，请在 PowerShell 中运行：
 
@@ -49,4 +55,4 @@ setx TYPESAFE_API_KEY "你的 TypeSafe API Key"
 
 ## 上游与许可
 
-本项目基于 [rime/weasel](https://github.com/rime/weasel)，输入引擎、输入方案、界面和大量依赖均来自 Rime 社区及上游贡献者。感谢[上游贡献者](https://github.com/rime/weasel/graphs/contributors)。本项目沿用 [GNU GPLv3 许可](LICENSE.txt)；各第三方组件仍遵循其各自的许可证。
+本项目基于 [rime/weasel](https://github.com/rime/weasel)，输入引擎、输入方案、界面和大量依赖均来自 Rime 社区及上游贡献者。感谢[上游贡献者](https://github.com/rime/weasel/graphs/contributors)。本项目沿用 [GNU GPLv3 许可](LICENSE.txt)；Octagram 模型数据来自 [lotem/rime-octagram-data](https://github.com/lotem/rime-octagram-data)，遵循其 LGPL-3.0 许可；其他第三方组件仍遵循各自的许可证。
