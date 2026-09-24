@@ -39,6 +39,8 @@ setx TYPESAFE_API_KEY "你的 TypeSafe API Key"
 
 `test/TestJevLogic` 包含不联网的 C++ 单元测试，CI 会自动运行；`test/TestJevAccuracy` 包含带标准答案的中文上下文样本，可以调用真实 Jev API，分别计算模型第一选择准确率和小狼毫按置信度规则实际采用的准确率。运行方法见各目录内的 README。
 
+三层候选管线的当前实现、引擎级对照评测方法和 librime 候选质量接口要求见[架构说明](docs/jev-octagram-architecture.md)。
+
 ## 小狼毫基本使用
 
 - 使用 <kbd>Ctrl</kbd> + <kbd>`</kbd> 或 <kbd>F4</kbd> 打开输入方案菜单。
