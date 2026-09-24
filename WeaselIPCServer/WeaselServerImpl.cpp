@@ -28,6 +28,8 @@ using namespace weasel;
 
 extern CAppModule _Module;
 
+static std::mutex g_api_mutex;
+
 ServerImpl::ServerImpl()
     : m_pRequestHandler(NULL),
       m_darkMode(IsUserDarkMode()),
@@ -144,6 +146,19 @@ LRESULT ServerImpl::OnServiceNotifyMessage(UINT uMsg,
   return 0;
 }
 
+LRESULT ServerImpl::OnJevResultMessage(UINT uMsg,
+                                       WPARAM wParam,
+                                       LPARAM lParam,
+                                       BOOL& bHandled) {
+  // Jev completes on a worker thread. Apply its result here so all librime and
+  // candidate UI operations remain serialized with pipe requests.
+  std::lock_guard guard(g_api_mutex);
+  if (m_pRequestHandler) {
+    m_pRequestHandler->ApplyPendingJevResult();
+  }
+  return 0;
+}
+
 DWORD ServerImpl::OnCommand(WEASEL_IPC_COMMAND uMsg,
                             DWORD wParam,
                             DWORD lParam) {
@@ -174,8 +189,6 @@ int ServerImpl::Stop() {
   PostMessage(WM_QUIT);
   return 0;
 }
-
-static std::mutex g_api_mutex;
 
 int ServerImpl::Run() {
   // This workaround causes a VC internal error:
@@ -481,6 +494,12 @@ void Server::AddMenuHandler(UINT uID, CommandHandler handler) {
 
 void Server::SetTrayRefreshCallback(std::function<void()> callback) {
   m_pImpl->SetTrayRefreshCallback(callback);
+}
+
+void Server::NotifyJevResult() {
+  if (m_pImpl->m_hWnd) {
+    ::PostMessage(m_pImpl->m_hWnd, WM_WEASEL_JEV_RESULT, 0, 0);
+  }
 }
 
 HWND Server::GetHWnd() {

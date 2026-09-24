@@ -29,6 +29,7 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
   MESSAGE_HANDLER(WM_SETTINGCHANGE, OnColorChange)
   MESSAGE_HANDLER(WM_COMMAND, OnCommand)
   MESSAGE_HANDLER(WM_WEASEL_SERVICE_NOTIFY, OnServiceNotifyMessage)
+  MESSAGE_HANDLER(WM_WEASEL_JEV_RESULT, OnJevResultMessage)
   END_MSG_MAP()
 
   LRESULT OnColorChange(UINT uMsg,
@@ -51,6 +52,10 @@ class ServerImpl : public CWindowImpl<ServerImpl, CWindow, ServerWinTraits>
                                  WPARAM wParam,
                                  LPARAM lParam,
                                  BOOL& bHandled);
+  LRESULT OnJevResultMessage(UINT uMsg,
+                             WPARAM wParam,
+                             LPARAM lParam,
+                             BOOL& bHandled);
   DWORD OnCommand(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
   DWORD OnEcho(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
   DWORD OnStartSession(WEASEL_IPC_COMMAND uMsg, DWORD wParam, DWORD lParam);
