@@ -168,7 +168,10 @@ std::string UpdateContextWindow(const std::string& context,
   const size_t hard_start = units.size() - maximum_codepoints;
   std::vector<size_t> boundaries;
   for (size_t i = hard_start; i < units.size(); ++i) {
-    if (IsContextBoundary(units[i].codepoint))
+    const bool ends_boundary_run =
+        IsContextBoundary(units[i].codepoint) &&
+        (i + 1 == units.size() || !IsContextBoundary(units[i + 1].codepoint));
+    if (ends_boundary_run)
       boundaries.push_back(i);
   }
 

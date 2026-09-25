@@ -5,6 +5,7 @@
 #include <boost/detail/lightweight_test.hpp>
 #include <JevIntentRouter.h>
 #include <ResponseParser.h>
+#include <iostream>
 #include <string>
 
 void test_1() {
@@ -130,6 +131,9 @@ void test_jev_context_window() {
              "previous\xef\xbc\x8c"
              "current");
 
+  const std::string crlf = "aaaaaaaaaa.\r\nprevious,current";
+  BOOST_TEST(UpdateContextWindow({}, crlf, 20) == "previous,current");
+
   const std::string emoji = "\xf0\x9f\x98\x80";
   std::string many_emoji;
   for (size_t i = 0; i < 130; ++i)
@@ -249,13 +253,22 @@ void test_jev_ranking_and_validation() {
 }
 
 int _tmain(int argc, _TCHAR* argv[]) {
+  std::cerr << "[ RUN      ] ResponseParser.noop\n";
   test_1();
+  std::cerr << "[ RUN      ] ResponseParser.commit\n";
   test_2();
+  std::cerr << "[ RUN      ] ResponseParser.preedit\n";
   test_3();
+  std::cerr << "[ RUN      ] ResponseParser.candidates\n";
   test_4();
+  std::cerr << "[ RUN      ] Jev.choices\n";
   test_jev_choices();
+  std::cerr << "[ RUN      ] Jev.context_window\n";
   test_jev_context_window();
+  std::cerr << "[ RUN      ] Jev.ranking_and_validation\n";
   test_jev_ranking_and_validation();
 
-  return boost::report_errors();
+  const int errors = boost::report_errors();
+  std::cerr << "[ COMPLETE ] errors=" << errors << "\n";
+  return errors;
 }

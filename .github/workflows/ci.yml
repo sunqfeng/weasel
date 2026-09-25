@@ -157,10 +157,11 @@ jobs:
           $output >> $env:GITHUB_STEP_SUMMARY
           '```' >> $env:GITHUB_STEP_SUMMARY
           if ($exitCode -ne 0) {
-            $output | ForEach-Object {
-              $escaped = "$_".Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-              Write-Output "::error title=Unit test failure::$escaped"
-            }
+            $details = ($output | Out-String).Trim()
+            if (!$details) { $details = 'The test process produced no output.' }
+            $message = "Exit code ${exitCode}: ${details}"
+            $escaped = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error file=test/TestResponseParser/TestResponseParser.cpp,line=1,title=Unit test failure::$escaped"
             exit $exitCode
           }
 
