@@ -2,10 +2,12 @@
 //
 
 #include "stdafx.h"
+#include <boost/archive/text_woarchive.hpp>
 #include <boost/detail/lightweight_test.hpp>
 #include <JevIntentRouter.h>
 #include <ResponseParser.h>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 void test_1() {
@@ -54,22 +56,44 @@ void test_3() {
   BOOST_TEST(ctx.aux.str == L"sie'zuoh'chuan=3.14");
 }
 
-void test_4() {
+void test_malformed_cursor() {
   WCHAR resp[] =
-      L"action=commit,ctx\n"
-      L"ctx.preedit=候選乙=3.14\n"
-      L"ctx.preedit.cursor=0,3\n"
-      L"ctx.cand.length=2\n"
-      L"ctx.cand.0=候選甲\n"
-      L"ctx.cand.1=候選乙\n"
-      L"ctx.cand.cursor=1\n"
-      L"ctx.cand.page=0/1\n";
-  DWORD len = wcslen(resp);
+      L"action=ctx\n"
+      L"ctx.preedit=安全忽略\n"
+      L"ctx.preedit.cursor=0,3\n";
   std::wstring commit;
   weasel::Context ctx;
   weasel::Status status;
   weasel::ResponseParser parser(&commit, &ctx, &status);
-  parser(resp, len);
+  parser(resp, wcslen(resp));
+  BOOST_TEST(ctx.preedit.str == L"安全忽略");
+  BOOST_TEST(ctx.preedit.attributes.empty());
+}
+
+void test_4() {
+  weasel::CandidateInfo candidates;
+  candidates.candies.resize(2);
+  candidates.candies[0].str = L"候選甲";
+  candidates.candies[1].str = L"候選乙";
+  candidates.highlighted = 1;
+  candidates.currentPage = 0;
+  candidates.totalPages = 1;
+  std::wstringstream serialized;
+  boost::archive::text_woarchive archive(serialized);
+  archive << candidates;
+
+  std::wstring resp =
+      L"action=ctx\n"
+      L"ctx.preedit=候選乙=3.14\n"
+      L"ctx.preedit.cursor=0,3,3\n"
+      L"ctx.cand=" +
+      serialized.str() + L"\n";
+  DWORD len = static_cast<DWORD>(resp.size());
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser(resp.data(), len);
   BOOST_TEST(commit.empty());
   BOOST_TEST(ctx.preedit.str == L"候選乙=3.14");
   BOOST_ASSERT(1 == ctx.preedit.attributes.size());
@@ -259,6 +283,8 @@ int _tmain(int argc, _TCHAR* argv[]) {
   test_2();
   std::cerr << "[ RUN      ] ResponseParser.preedit\n";
   test_3();
+  std::cerr << "[ RUN      ] ResponseParser.malformed_cursor\n";
+  test_malformed_cursor();
   std::cerr << "[ RUN      ] ResponseParser.candidates\n";
   test_4();
   std::cerr << "[ RUN      ] Jev.choices\n";
