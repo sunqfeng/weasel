@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <mutex>
+#include <vector>
 
 #include <rime_api.h>
 
@@ -36,6 +37,7 @@ struct SessionStatus {
   std::string client_app;
   std::string jev_history;
   std::string jev_last_signature;
+  std::string jev_pending_commit;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
 typedef DWORD WeaselSessionId;
@@ -93,7 +95,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   void _StartJev();
   void _StopJev();
   void _ScheduleJev(WeaselSessionId ipc_id, const RimeContext& ctx);
-  void _ApplyJev(WeaselSessionId ipc_id);
+  bool _ApplyJev(WeaselSessionId ipc_id);
 
   RimeSessionId to_session_id(WeaselSessionId ipc_id) {
     return m_session_status_map[ipc_id].session_id;
