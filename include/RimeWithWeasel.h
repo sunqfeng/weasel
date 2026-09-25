@@ -37,8 +37,6 @@ struct SessionStatus {
   std::string client_app;
   std::string jev_history;
   std::string jev_last_signature;
-  std::vector<size_t> jev_display_order;
-  std::vector<std::string> jev_ranked_candidates;
   std::string jev_pending_commit;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
@@ -86,9 +84,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   bool _ShowMessage(weasel::Context& ctx, weasel::Status& status);
   bool _Respond(WeaselSessionId ipc_id, EatLine eat);
   void _ReadClientInfo(WeaselSessionId ipc_id, LPWSTR buffer);
-  void _GetCandidateInfo(weasel::CandidateInfo& cinfo,
-                         RimeContext& ctx,
-                         WeaselSessionId ipc_id);
+  void _GetCandidateInfo(weasel::CandidateInfo& cinfo, RimeContext& ctx);
   void _GetStatus(weasel::Status& stat,
                   WeaselSessionId ipc_id,
                   weasel::Context& ctx);

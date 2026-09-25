@@ -100,8 +100,16 @@ std::set<std::string> ParseAllowedApps(const std::string& value) {
   return apps;
 }
 
+bool IsSafeHttpHeaderValue(const std::string& value) {
+  return !value.empty() &&
+         std::all_of(value.begin(), value.end(),
+                     [](unsigned char c) { return c >= 0x21 && c <= 0x7e; });
+}
+
 std::optional<JevState::Result> AskJev(const std::string& api_key,
                                        const JevState::Request& request) {
+  if (!IsSafeHttpHeaderValue(api_key))
+    return std::nullopt;
   boost::property_tree::ptree state;
   state.put("committed_context", request.context);
   state.put("phonetic_input", request.input);
@@ -172,7 +180,9 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   std::string response;
   for (;;) {
     DWORD available = 0;
-    if (!WinHttpQueryDataAvailable(http_request, &available) || !available)
+    if (!WinHttpQueryDataAvailable(http_request, &available))
+      return std::nullopt;
+    if (!available)
       break;
     if (response.size() + available > 1024 * 1024)
       return std::nullopt;
@@ -447,8 +457,10 @@ BOOL RimeWithWeaselHandler::ProcessKeyEvent(KeyEvent keyEvent,
   if (m_disabled)
     return FALSE;
   bool jev_committed_raw_input = false;
+  // Caps Lock does not change Space semantics. Reject every other known or
+  // future modifier so Jev can never consume an application shortcut.
   if (keyEvent.keycode == ibus::Keycode::space &&
-      !(keyEvent.mask & ibus::Modifier::RELEASE_MASK)) {
+      !(keyEvent.mask & ~ibus::Modifier::LOCK_MASK)) {
     jev_committed_raw_input = _ApplyJev(ipc_id);
   }
   RimeSessionId session_id = to_session_id(ipc_id);
@@ -502,9 +514,7 @@ void RimeWithWeaselHandler::SelectCandidateOnCurrentPage(
              << ", index = " << index;
   if (m_disabled)
     return;
-  const auto& order = get_session_status(ipc_id).jev_display_order;
-  const size_t rime_index = index < order.size() ? order[index] : index;
-  rime_api->select_candidate_on_current_page(to_session_id(ipc_id), rime_index);
+  rime_api->select_candidate_on_current_page(to_session_id(ipc_id), index);
 }
 
 bool RimeWithWeaselHandler::HighlightCandidateOnCurrentPage(
@@ -513,10 +523,8 @@ bool RimeWithWeaselHandler::HighlightCandidateOnCurrentPage(
     EatLine eat) {
   DLOG(INFO) << "highlight candidate on current page, ipc_id = " << ipc_id
              << ", index = " << index;
-  const auto& order = get_session_status(ipc_id).jev_display_order;
-  const size_t rime_index = index < order.size() ? order[index] : index;
   bool res = rime_api->highlight_candidate_on_current_page(
-      to_session_id(ipc_id), rime_index);
+      to_session_id(ipc_id), index);
   _Respond(ipc_id, eat);
   _UpdateUI(ipc_id);
   return res;
@@ -650,8 +658,7 @@ void RimeWithWeaselHandler::_ReadClientInfo(WeaselSessionId ipc_id,
 }
 
 void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
-                                              RimeContext& ctx,
-                                              WeaselSessionId ipc_id) {
+                                              RimeContext& ctx) {
   cinfo.candies.resize(ctx.menu.num_candidates);
   cinfo.comments.resize(ctx.menu.num_candidates);
   cinfo.labels.resize(ctx.menu.num_candidates);
@@ -673,25 +680,6 @@ void RimeWithWeaselHandler::_GetCandidateInfo(CandidateInfo& cinfo,
   cinfo.highlighted = ctx.menu.highlighted_candidate_index;
   cinfo.currentPage = ctx.menu.page_no;
   cinfo.is_last_page = ctx.menu.is_last_page;
-
-  const auto& order = get_session_status(ipc_id).jev_display_order;
-  if (ctx.menu.page_no != 0 || order.empty() ||
-      order.size() > cinfo.candies.size()) {
-    return;
-  }
-  const auto candies = cinfo.candies;
-  const auto comments = cinfo.comments;
-  const auto labels = cinfo.labels;
-  for (size_t display = 0; display < order.size(); ++display) {
-    const size_t original = order[display];
-    if (original >= candies.size())
-      return;
-    cinfo.candies[display] = candies[original];
-    cinfo.comments[display] = comments[original];
-    cinfo.labels[display] = labels[original];
-    if (original == static_cast<size_t>(ctx.menu.highlighted_candidate_index))
-      cinfo.highlighted = static_cast<int>(display);
-  }
 }
 
 void RimeWithWeaselHandler::_StartJev() {
@@ -802,8 +790,6 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
   if (signature == status.jev_last_signature)
     return;
   status.jev_last_signature = std::move(signature);
-  status.jev_display_order.clear();
-  status.jev_ranked_candidates.clear();
   request.choices =
       weasel::jev::BuildChoices(request.candidates, request.input);
   if (request.choices.size() < 2)
@@ -833,6 +819,10 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   RIME_STRUCT(RimeContext, ctx);
   if (!rime_api->get_context(session_id, &ctx))
     return false;
+  if (ctx.menu.page_no != 0) {
+    rime_api->free_context(&ctx);
+    return false;
+  }
   const char* raw_input = rime_api->get_input(session_id);
   std::vector<std::string> candidates;
   candidates.reserve(ctx.menu.num_candidates);
@@ -843,16 +833,12 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   bool committed_raw_input = false;
   if (matches) {
     SessionStatus& status = get_session_status(ipc_id);
-    status.jev_display_order.clear();
-    for (const auto& ranked : result->ranking)
-      status.jev_display_order.push_back(ranked.candidate_index);
-    status.jev_ranked_candidates = result->request.candidates;
     if (result->selected.kind == weasel::jev::ChoiceKind::raw_input) {
       status.jev_pending_commit = result->selected.text;
       rime_api->clear_composition(session_id);
       committed_raw_input = true;
-    } else if (!result->ranking.empty()) {
-      const size_t top = result->ranking.front().candidate_index;
+    } else {
+      const size_t top = result->selected.candidate_index;
       rime_api->highlight_candidate_on_current_page(session_id, top);
       DLOG(INFO) << "Jev ranked candidate " << top << " first with probability "
                  << result->probability;
@@ -1148,8 +1134,6 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     session_status.jev_history = wtou8(history);
     session_status.jev_pending_commit.clear();
     session_status.jev_last_signature.clear();
-    session_status.jev_display_order.clear();
-    session_status.jev_ranked_candidates.clear();
   }
   RIME_STRUCT(RimeCommit, commit);
   if (rime_api->get_commit(session_id, &commit)) {
@@ -1162,8 +1146,6 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
       history.erase(0, history.size() - 128);
     session_status.jev_history = wtou8(history);
     session_status.jev_last_signature.clear();
-    session_status.jev_display_order.clear();
-    session_status.jev_ranked_candidates.clear();
     rime_api->free_commit(&commit);
   }
 
@@ -1205,7 +1187,7 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     bool has_candidates = ctx.menu.num_candidates > 0;
     CandidateInfo cinfo;
     if (has_candidates) {
-      _GetCandidateInfo(cinfo, ctx, ipc_id);
+      _GetCandidateInfo(cinfo, ctx);
       _ScheduleJev(ipc_id, ctx);
     }
     if (is_composing) {
@@ -1909,7 +1891,7 @@ void RimeWithWeaselHandler::_GetContext(Context& weasel_context,
     }
     if (ctx.menu.num_candidates) {
       CandidateInfo& cinfo(weasel_context.cinfo);
-      _GetCandidateInfo(cinfo, ctx, m_active_session);
+      _GetCandidateInfo(cinfo, ctx);
     }
     rime_api->free_context(&ctx);
   }

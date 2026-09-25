@@ -71,18 +71,33 @@ const Choice* FindChoice(const RequestSnapshot& request,
 }
 
 bool HasValidChoices(const RequestSnapshot& request) {
+  bool has_raw_input = false;
   for (size_t i = 0; i < request.choices.size(); ++i) {
     const Choice& choice = request.choices[i];
     if (choice.key.empty() || choice.text.empty())
       return false;
-    if (choice.kind == ChoiceKind::candidate &&
-        (choice.candidate_index >= request.candidates.size() ||
-         choice.text != request.candidates[choice.candidate_index])) {
+    if (choice.kind == ChoiceKind::candidate) {
+      if (choice.candidate_index >= request.candidates.size() ||
+          choice.key != "candidate_" + std::to_string(choice.candidate_index) ||
+          choice.text != request.candidates[choice.candidate_index]) {
+        return false;
+      }
+    } else if (choice.kind == ChoiceKind::raw_input) {
+      if (has_raw_input || choice.key != "raw_input" ||
+          choice.text != request.input || !IsSafeRawInput(choice.text)) {
+        return false;
+      }
+      has_raw_input = true;
+    } else {
       return false;
     }
     for (size_t j = i + 1; j < request.choices.size(); ++j) {
-      if (choice.key == request.choices[j].key)
+      if (choice.key == request.choices[j].key ||
+          (choice.kind == ChoiceKind::candidate &&
+           request.choices[j].kind == ChoiceKind::candidate &&
+           choice.candidate_index == request.choices[j].candidate_index)) {
         return false;
+      }
     }
   }
   return !request.choices.empty();
@@ -152,6 +167,20 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
     const auto confidence = answer.get_optional<double>("confidence");
     if (!probabilities && !confidence)
       return std::nullopt;
+    if (probabilities) {
+      std::vector<std::string> probability_keys;
+      probability_keys.reserve(probabilities->size());
+      for (const auto& probability : *probabilities) {
+        if (!FindChoice(request, probability.first) ||
+            std::find(probability_keys.begin(), probability_keys.end(),
+                      probability.first) != probability_keys.end()) {
+          return std::nullopt;
+        }
+        probability_keys.push_back(probability.first);
+      }
+      if (probability_keys.size() != request.choices.size())
+        return std::nullopt;
+    }
     double maximum_probability = -1;
     for (const Choice& choice : request.choices) {
       double probability = 0;
@@ -178,6 +207,20 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
         });
     if (probabilities && decision.probability < maximum_probability)
       return std::nullopt;
+    if (selected->kind == ChoiceKind::candidate &&
+        (decision.ranking.empty() || decision.ranking.front().candidate_index !=
+                                         selected->candidate_index)) {
+      return std::nullopt;
+    }
+    for (size_t i = 0; i < request.candidates.size(); ++i) {
+      const auto ranked =
+          std::find_if(decision.ranking.begin(), decision.ranking.end(),
+                       [i](const RankedCandidate& candidate) {
+                         return candidate.candidate_index == i;
+                       });
+      if (ranked == decision.ranking.end())
+        decision.ranking.push_back({i, 0});
+    }
     return decision;
   } catch (...) {
     return std::nullopt;

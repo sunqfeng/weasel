@@ -110,6 +110,11 @@ void test_jev_choices() {
 
   const auto without_raw = BuildChoices(candidates, "wo zhi dao", 10);
   BOOST_TEST_EQ(3, without_raw.size());
+
+  const auto with_empty_candidate =
+      BuildChoices({"", candidates[1]}, "wozhidao", 10);
+  BOOST_TEST_EQ(2, with_empty_candidate.size());
+  BOOST_TEST(with_empty_candidate[0].key == "candidate_1");
 }
 
 void test_jev_ranking_and_validation() {
@@ -138,8 +143,8 @@ void test_jev_ranking_and_validation() {
   BOOST_TEST(!MatchesSnapshot(*decision, 42, "changed", request.candidates));
   BOOST_TEST(!MatchesSnapshot(*decision, 42, "wozhid",
                               {request.candidates[0], request.candidates[2]}));
-  BOOST_TEST(!MatchesSnapshot(*decision, 42, "wozhid", request.candidates,
-                              0.80));
+  BOOST_TEST(
+      !MatchesSnapshot(*decision, 42, "wozhid", request.candidates, 0.80));
 
   const auto invalid = ParseDecision(
       request,
@@ -155,6 +160,16 @@ void test_jev_ranking_and_validation() {
       request,
       R"({"answers":{"intent":{"choice":"candidate_0","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})");
   BOOST_TEST(!selected_is_not_maximum);
+
+  const auto selected_loses_stable_tie = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.40,"candidate_1":0.40,"candidate_2":0.20,"raw_input":0.0}}}})");
+  BOOST_TEST(!selected_loses_stable_tie);
+
+  const auto extra_probability = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.10,"candidate_1":0.70,"candidate_2":0.10,"raw_input":0.0,"invented_text":0.10}}}})");
+  BOOST_TEST(!extra_probability);
 
   const auto out_of_range = ParseDecision(
       request,
@@ -172,11 +187,39 @@ void test_jev_ranking_and_validation() {
     BOOST_TEST(MatchesSnapshot(*raw, 42, "wozhid", request.candidates));
   }
 
+  RequestSnapshot request_with_empty = request;
+  request_with_empty.candidates = {"", request.candidates[1]};
+  request_with_empty.choices =
+      BuildChoices(request_with_empty.candidates, request_with_empty.input);
+  const auto ranked_with_empty = ParseDecision(
+      request_with_empty,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_1":0.80,"raw_input":0.20}}}})");
+  BOOST_TEST(ranked_with_empty.has_value());
+  if (ranked_with_empty) {
+    BOOST_TEST_EQ(2, ranked_with_empty->ranking.size());
+    BOOST_TEST_EQ(1, ranked_with_empty->ranking[0].candidate_index);
+    BOOST_TEST_EQ(0, ranked_with_empty->ranking[1].candidate_index);
+  }
+
+  const auto confidence_only = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","confidence":0.75}}})");
+  BOOST_TEST(confidence_only.has_value());
+  if (confidence_only)
+    BOOST_TEST(
+        MatchesSnapshot(*confidence_only, 42, "wozhid", request.candidates));
+
   RequestSnapshot malformed = request;
   malformed.choices[0].candidate_index = 99;
   BOOST_TEST(!ParseDecision(
       malformed,
       R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})"));
+
+  malformed = request;
+  malformed.choices.back().text = "server_supplied_text";
+  BOOST_TEST(!ParseDecision(
+      malformed,
+      R"({"answers":{"intent":{"choice":"raw_input","probabilities":{"candidate_0":0.0,"candidate_1":0.0,"candidate_2":0.0,"raw_input":1.0}}}})"));
 }
 
 int _tmain(int argc, _TCHAR* argv[]) {
