@@ -70,6 +70,24 @@ const Choice* FindChoice(const RequestSnapshot& request,
   return found == request.choices.end() ? nullptr : &*found;
 }
 
+bool HasValidChoices(const RequestSnapshot& request) {
+  for (size_t i = 0; i < request.choices.size(); ++i) {
+    const Choice& choice = request.choices[i];
+    if (choice.key.empty() || choice.text.empty())
+      return false;
+    if (choice.kind == ChoiceKind::candidate &&
+        (choice.candidate_index >= request.candidates.size() ||
+         choice.text != request.candidates[choice.candidate_index])) {
+      return false;
+    }
+    for (size_t j = i + 1; j < request.choices.size(); ++j) {
+      if (choice.key == request.choices[j].key)
+        return false;
+    }
+  }
+  return !request.choices.empty();
+}
+
 }  // namespace
 
 std::string ClassifyText(const std::string& text) {
@@ -116,6 +134,8 @@ std::vector<Choice> BuildChoices(const std::vector<std::string>& candidates,
 std::optional<Decision> ParseDecision(const RequestSnapshot& request,
                                       const std::string& json) {
   try {
+    if (!HasValidChoices(request))
+      return std::nullopt;
     boost::property_tree::ptree response;
     std::istringstream input(json);
     boost::property_tree::read_json(input, response);
@@ -129,13 +149,20 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
     decision.request = request;
     decision.selected = *selected;
     const auto probabilities = answer.get_child_optional("probabilities");
+    const auto confidence = answer.get_optional<double>("confidence");
+    if (!probabilities && !confidence)
+      return std::nullopt;
     double maximum_probability = -1;
     for (const Choice& choice : request.choices) {
       double probability = 0;
-      if (probabilities)
-        probability = probabilities->get<double>(choice.key, 0);
-      if (choice.key == selected_key && !probabilities)
-        probability = answer.get<double>("confidence", 0);
+      if (probabilities) {
+        const auto value = probabilities->get_optional<double>(choice.key);
+        if (!value)
+          return std::nullopt;
+        probability = *value;
+      } else if (choice.key == selected_key) {
+        probability = *confidence;
+      }
       if (!std::isfinite(probability) || probability < 0 || probability > 1)
         return std::nullopt;
       if (choice.key == selected_key)

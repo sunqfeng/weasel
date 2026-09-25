@@ -148,7 +148,15 @@ jobs:
       - name: Run unit tests
         if: matrix.variant == 'msbuild'
         shell: pwsh
-        run: .\x64\Release\TestResponseParser.exe
+        run: |
+          $output = & .\x64\Release\TestResponseParser.exe 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          "## Unit test output" >> $env:GITHUB_STEP_SUMMARY
+          '```text' >> $env:GITHUB_STEP_SUMMARY
+          $output >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+          if ($exitCode -ne 0) { exit $exitCode }
 
       - name: Compress Debug Symbols
         if: matrix.variant == 'msbuild'

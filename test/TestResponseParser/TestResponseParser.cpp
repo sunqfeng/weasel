@@ -102,6 +102,14 @@ void test_jev_choices() {
   BOOST_TEST_EQ(4, choices.size());
   BOOST_TEST(choices[0].key == "candidate_0");
   BOOST_TEST(choices[3].key == "raw_input");
+
+  const auto limited = BuildChoices(candidates, "wozhidao", 2);
+  BOOST_TEST_EQ(3, limited.size());
+  BOOST_TEST(limited[1].key == "candidate_1");
+  BOOST_TEST(limited[2].key == "raw_input");
+
+  const auto without_raw = BuildChoices(candidates, "wo zhi dao", 10);
+  BOOST_TEST_EQ(3, without_raw.size());
 }
 
 void test_jev_ranking_and_validation() {
@@ -128,11 +136,47 @@ void test_jev_ranking_and_validation() {
   BOOST_TEST(MatchesSnapshot(*decision, 42, "wozhid", request.candidates));
   BOOST_TEST(!MatchesSnapshot(*decision, 43, "wozhid", request.candidates));
   BOOST_TEST(!MatchesSnapshot(*decision, 42, "changed", request.candidates));
+  BOOST_TEST(!MatchesSnapshot(*decision, 42, "wozhid",
+                              {request.candidates[0], request.candidates[2]}));
+  BOOST_TEST(!MatchesSnapshot(*decision, 42, "wozhid", request.candidates,
+                              0.80));
 
   const auto invalid = ParseDecision(
       request,
       R"({"answers":{"intent":{"choice":"invented_text","confidence":0.99}}})");
   BOOST_TEST(!invalid);
+
+  const auto incomplete = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12}}}})");
+  BOOST_TEST(!incomplete);
+
+  const auto selected_is_not_maximum = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_0","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})");
+  BOOST_TEST(!selected_is_not_maximum);
+
+  const auto out_of_range = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.0,"candidate_1":1.01,"candidate_2":0.0,"raw_input":0.0}}}})");
+  BOOST_TEST(!out_of_range);
+
+  const auto raw = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"raw_input","probabilities":{"candidate_0":0.05,"candidate_1":0.10,"candidate_2":0.05,"raw_input":0.80}}}})");
+  BOOST_TEST(raw.has_value());
+  if (raw) {
+    BOOST_TEST(static_cast<int>(raw->selected.kind) ==
+               static_cast<int>(ChoiceKind::raw_input));
+    BOOST_TEST(raw->selected.text == request.input);
+    BOOST_TEST(MatchesSnapshot(*raw, 42, "wozhid", request.candidates));
+  }
+
+  RequestSnapshot malformed = request;
+  malformed.choices[0].candidate_index = 99;
+  BOOST_TEST(!ParseDecision(
+      malformed,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})"));
 }
 
 int _tmain(int argc, _TCHAR* argv[]) {
