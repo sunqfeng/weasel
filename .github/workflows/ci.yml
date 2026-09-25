@@ -156,7 +156,13 @@ jobs:
           '```text' >> $env:GITHUB_STEP_SUMMARY
           $output >> $env:GITHUB_STEP_SUMMARY
           '```' >> $env:GITHUB_STEP_SUMMARY
-          if ($exitCode -ne 0) { exit $exitCode }
+          if ($exitCode -ne 0) {
+            $output | ForEach-Object {
+              $escaped = "$_".Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Output "::error title=Unit test failure::$escaped"
+            }
+            exit $exitCode
+          }
 
       - name: Compress Debug Symbols
         if: matrix.variant == 'msbuild'

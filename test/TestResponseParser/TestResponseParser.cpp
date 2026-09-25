@@ -117,6 +117,27 @@ void test_jev_choices() {
   BOOST_TEST(with_empty_candidate[0].key == "candidate_1");
 }
 
+void test_jev_context_window() {
+  using namespace weasel::jev;
+  BOOST_TEST(UpdateContextWindow("already", " committed", 128) ==
+             "already committed");
+
+  const std::string semantic =
+      "aaaaaaaaaa\xe3\x80\x82"
+      "previous\xef\xbc\x8c"
+      "current";
+  BOOST_TEST(UpdateContextWindow({}, semantic, 20) ==
+             "previous\xef\xbc\x8c"
+             "current");
+
+  const std::string emoji = "\xf0\x9f\x98\x80";
+  std::string many_emoji;
+  for (size_t i = 0; i < 130; ++i)
+    many_emoji += emoji;
+  BOOST_TEST(UpdateContextWindow({}, many_emoji, 128) ==
+             many_emoji.substr(emoji.size() * 2));
+}
+
 void test_jev_ranking_and_validation() {
   using namespace weasel::jev;
   RequestSnapshot request;
@@ -187,6 +208,11 @@ void test_jev_ranking_and_validation() {
     BOOST_TEST(MatchesSnapshot(*raw, 42, "wozhid", request.candidates));
   }
 
+  const auto raw_ties_candidate = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"raw_input","probabilities":{"candidate_0":0.50,"candidate_1":0.0,"candidate_2":0.0,"raw_input":0.50}}}})");
+  BOOST_TEST(!raw_ties_candidate);
+
   RequestSnapshot request_with_empty = request;
   request_with_empty.candidates = {"", request.candidates[1]};
   request_with_empty.choices =
@@ -228,6 +254,7 @@ int _tmain(int argc, _TCHAR* argv[]) {
   test_3();
   test_4();
   test_jev_choices();
+  test_jev_context_window();
   test_jev_ranking_and_validation();
 
   return boost::report_errors();

@@ -40,6 +40,9 @@ struct Decision {
 
 std::string ClassifyText(const std::string& text);
 bool IsSafeRawInput(const std::string& input);
+std::string UpdateContextWindow(const std::string& context,
+                                const std::string& committed_text,
+                                size_t maximum_codepoints = 128);
 std::vector<Choice> BuildChoices(const std::vector<std::string>& candidates,
                                  const std::string& input,
                                  size_t limit = 10);

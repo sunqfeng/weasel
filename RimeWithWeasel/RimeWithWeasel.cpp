@@ -100,6 +100,10 @@ std::set<std::string> ParseAllowedApps(const std::string& value) {
   return apps;
 }
 
+void AppendSignaturePart(std::string& signature, const std::string& value) {
+  signature.append(std::to_string(value.size())).append(":").append(value);
+}
+
 bool IsSafeHttpHeaderValue(const std::string& value) {
   return !value.empty() &&
          std::all_of(value.begin(), value.end(),
@@ -143,9 +147,8 @@ std::optional<JevState::Result> AskJev(const std::string& api_key,
   WinHttpHandle session(
       WinHttpOpen(L"Weasel-Jev/0.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-  if (!session)
+  if (!session || !WinHttpSetTimeouts(session, 200, 200, 800, 800))
     return std::nullopt;
-  WinHttpSetTimeouts(session, 200, 200, 800, 800);
 
   WinHttpHandle connection(WinHttpConnect(session, L"api.typesafe.ai",
                                           INTERNET_DEFAULT_HTTPS_PORT, 0));
@@ -781,11 +784,13 @@ void RimeWithWeaselHandler::_ScheduleJev(WeaselSessionId ipc_id,
   request.input = raw_input ? raw_input : ctx.composition.preedit;
   const size_t candidate_count = std::min<size_t>(ctx.menu.num_candidates, 10);
   request.candidates.reserve(candidate_count);
-  std::string signature = request.context + "\n" + request.input;
+  std::string signature;
+  AppendSignaturePart(signature, request.context);
+  AppendSignaturePart(signature, request.input);
   for (size_t i = 0; i < candidate_count; ++i) {
     const std::string candidate = ctx.menu.candidates[i].text;
     request.candidates.push_back(candidate);
-    signature.append("\n").append(candidate);
+    AppendSignaturePart(signature, candidate);
   }
   if (signature == status.jev_last_signature)
     return;
@@ -829,7 +834,10 @@ bool RimeWithWeaselHandler::_ApplyJev(WeaselSessionId ipc_id) {
   for (int i = 0; i < ctx.menu.num_candidates; ++i)
     candidates.emplace_back(ctx.menu.candidates[i].text);
   const bool matches = weasel::jev::MatchesSnapshot(
-      *result, ipc_id, raw_input ? raw_input : "", candidates);
+      *result, ipc_id,
+      raw_input ? raw_input
+                : (ctx.composition.preedit ? ctx.composition.preedit : ""),
+      candidates);
   bool committed_raw_input = false;
   if (matches) {
     SessionStatus& status = get_session_status(ipc_id);
@@ -1127,11 +1135,8 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     body.append(L"commit=")
         .append(escape_string(u8tow(session_status.jev_pending_commit)))
         .append(L"\n");
-    std::wstring history = u8tow(session_status.jev_history);
-    history.append(u8tow(session_status.jev_pending_commit));
-    if (history.size() > 128)
-      history.erase(0, history.size() - 128);
-    session_status.jev_history = wtou8(history);
+    session_status.jev_history = weasel::jev::UpdateContextWindow(
+        session_status.jev_history, session_status.jev_pending_commit);
     session_status.jev_pending_commit.clear();
     session_status.jev_last_signature.clear();
   }
@@ -1140,11 +1145,8 @@ bool RimeWithWeaselHandler::_Respond(WeaselSessionId ipc_id, EatLine eat) {
     actions.push_back("commit");
     std::wstring commit_text_w = escape_string(u8tow(commit.text));
     body.append(L"commit=").append(commit_text_w).append(L"\n");
-    std::wstring history = u8tow(session_status.jev_history);
-    history.append(u8tow(commit.text));
-    if (history.size() > 128)
-      history.erase(0, history.size() - 128);
-    session_status.jev_history = wtou8(history);
+    session_status.jev_history = weasel::jev::UpdateContextWindow(
+        session_status.jev_history, commit.text);
     session_status.jev_last_signature.clear();
     rime_api->free_commit(&commit);
   }

@@ -15,15 +15,19 @@ bool IsContinuationByte(unsigned char value) {
   return (value & 0xc0) == 0x80;
 }
 
-bool ContainsHan(const std::string& text) {
+struct Utf8Unit {
+  size_t offset = 0;
+  uint32_t codepoint = 0;
+};
+
+std::vector<Utf8Unit> DecodeUtf8Units(const std::string& text) {
+  std::vector<Utf8Unit> units;
+  units.reserve(text.size());
   for (size_t i = 0; i < text.size();) {
+    const size_t offset = i;
     const unsigned char lead = static_cast<unsigned char>(text[i]);
-    if (lead < 0x80) {
-      ++i;
-      continue;
-    }
-    size_t count = 0;
-    uint32_t codepoint = 0;
+    size_t count = 1;
+    uint32_t codepoint = lead;
     if ((lead & 0xe0) == 0xc0) {
       count = 2;
       codepoint = lead & 0x1f;
@@ -33,31 +37,52 @@ bool ContainsHan(const std::string& text) {
     } else if ((lead & 0xf8) == 0xf0) {
       count = 4;
       codepoint = lead & 0x07;
-    } else {
-      ++i;
-      continue;
     }
     if (i + count > text.size())
-      break;
-    bool valid = true;
+      count = 1;
     for (size_t j = 1; j < count; ++j) {
       const unsigned char next = static_cast<unsigned char>(text[i + j]);
       if (!IsContinuationByte(next)) {
-        valid = false;
+        count = 1;
+        codepoint = lead;
         break;
       }
       codepoint = (codepoint << 6) | (next & 0x3f);
     }
-    if (!valid) {
-      ++i;
-      continue;
-    }
+    units.push_back({offset, codepoint});
+    i += count;
+  }
+  return units;
+}
+
+bool IsContextBoundary(uint32_t codepoint) {
+  switch (codepoint) {
+    case '\n':
+    case '\r':
+    case ',':
+    case '.':
+    case ';':
+    case '!':
+    case '?':
+    case 0x3002:  // 。
+    case 0xff0c:  // ，
+    case 0xff1b:  // ；
+    case 0xff01:  // ！
+    case 0xff1f:  // ？
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool ContainsHan(const std::string& text) {
+  for (const auto& unit : DecodeUtf8Units(text)) {
+    const uint32_t codepoint = unit.codepoint;
     if ((codepoint >= 0x3400 && codepoint <= 0x4dbf) ||
         (codepoint >= 0x4e00 && codepoint <= 0x9fff) ||
         (codepoint >= 0x20000 && codepoint <= 0x2fa1f)) {
       return true;
     }
-    i += count;
   }
   return false;
 }
@@ -130,6 +155,32 @@ bool IsSafeRawInput(const std::string& input) {
   return has_letter;
 }
 
+std::string UpdateContextWindow(const std::string& context,
+                                const std::string& committed_text,
+                                size_t maximum_codepoints) {
+  std::string combined = context + committed_text;
+  if (!maximum_codepoints)
+    return {};
+  const auto units = DecodeUtf8Units(combined);
+  if (units.size() <= maximum_codepoints)
+    return combined;
+
+  const size_t hard_start = units.size() - maximum_codepoints;
+  std::vector<size_t> boundaries;
+  for (size_t i = hard_start; i < units.size(); ++i) {
+    if (IsContextBoundary(units[i].codepoint))
+      boundaries.push_back(i);
+  }
+
+  size_t start = hard_start;
+  if (boundaries.size() >= 2) {
+    start = boundaries[boundaries.size() - 2] + 1;
+  } else if (boundaries.size() == 1 && boundaries.front() + 1 < units.size()) {
+    start = boundaries.front() + 1;
+  }
+  return combined.substr(units[start].offset);
+}
+
 std::vector<Choice> BuildChoices(const std::vector<std::string>& candidates,
                                  const std::string& input,
                                  size_t limit) {
@@ -182,6 +233,7 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
         return std::nullopt;
     }
     double maximum_probability = -1;
+    const Choice* maximum_choice = nullptr;
     for (const Choice& choice : request.choices) {
       double probability = 0;
       if (probabilities) {
@@ -196,7 +248,10 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
         return std::nullopt;
       if (choice.key == selected_key)
         decision.probability = probability;
-      maximum_probability = (std::max)(maximum_probability, probability);
+      if (probability > maximum_probability) {
+        maximum_probability = probability;
+        maximum_choice = &choice;
+      }
       if (choice.kind == ChoiceKind::candidate)
         decision.ranking.push_back({choice.candidate_index, probability});
     }
@@ -205,7 +260,7 @@ std::optional<Decision> ParseDecision(const RequestSnapshot& request,
         [](const RankedCandidate& left, const RankedCandidate& right) {
           return left.probability > right.probability;
         });
-    if (probabilities && decision.probability < maximum_probability)
+    if (!maximum_choice || maximum_choice->key != selected_key)
       return std::nullopt;
     if (selected->kind == ChoiceKind::candidate &&
         (decision.ranking.empty() || decision.ranking.front().candidate_index !=
