@@ -121,7 +121,7 @@ CI 验证：
 
 - `./clang-format.sh -i`
 - `./build.bat arm64 installer`
-- `./msbuild/Release/x64/TestResponseParser.exe`
+- `./x64/Release/TestResponseParser.exe`
 - `./xbuild.bat arm64 installer`
 
 ## 完成标准

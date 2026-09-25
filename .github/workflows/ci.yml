@@ -148,7 +148,7 @@ jobs:
       - name: Run unit tests
         if: matrix.variant == 'msbuild'
         shell: pwsh
-        run: .\msbuild\Release\x64\TestResponseParser.exe
+        run: .\x64\Release\TestResponseParser.exe
 
       - name: Compress Debug Symbols
         if: matrix.variant == 'msbuild'
