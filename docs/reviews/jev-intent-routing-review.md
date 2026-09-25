@@ -37,3 +37,9 @@
 - `raw_input` 是否存在绕过请求快照提交任意服务端文本的路径。
 - 候选页码、输入或候选内容变化后，旧结果是否绝不会改变高亮或提交文本。
 - CI 是否同时通过 clang-format 18、MSBuild 单元测试和 xmake 构建。
+
+## 验证记录
+
+- 当前实现基线：`2988e55 fix: test current candidate response format`。
+- GitHub Actions 运行 `36088431989` 已通过 clang-format、MSBuild、单元测试、xmake 和安装包生成。
+- 生成测试安装包 `weasel-artifact-0.17.4.0.2988e55`；该构建仍是测试版本，不代表上面的异步候选置顶缺口已经完成。
