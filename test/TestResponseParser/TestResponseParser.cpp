@@ -2,8 +2,12 @@
 //
 
 #include "stdafx.h"
+#include <boost/archive/text_woarchive.hpp>
 #include <boost/detail/lightweight_test.hpp>
+#include <JevIntentRouter.h>
 #include <ResponseParser.h>
+#include <iostream>
+#include <sstream>
 #include <string>
 
 void test_1() {
@@ -52,22 +56,44 @@ void test_3() {
   BOOST_TEST(ctx.aux.str == L"sie'zuoh'chuan=3.14");
 }
 
-void test_4() {
+void test_malformed_cursor() {
   WCHAR resp[] =
-      L"action=commit,ctx\n"
-      L"ctx.preedit=候選乙=3.14\n"
-      L"ctx.preedit.cursor=0,3\n"
-      L"ctx.cand.length=2\n"
-      L"ctx.cand.0=候選甲\n"
-      L"ctx.cand.1=候選乙\n"
-      L"ctx.cand.cursor=1\n"
-      L"ctx.cand.page=0/1\n";
-  DWORD len = wcslen(resp);
+      L"action=ctx\n"
+      L"ctx.preedit=安全忽略\n"
+      L"ctx.preedit.cursor=0,3\n";
   std::wstring commit;
   weasel::Context ctx;
   weasel::Status status;
   weasel::ResponseParser parser(&commit, &ctx, &status);
-  parser(resp, len);
+  parser(resp, wcslen(resp));
+  BOOST_TEST(ctx.preedit.str == L"安全忽略");
+  BOOST_TEST(ctx.preedit.attributes.empty());
+}
+
+void test_4() {
+  weasel::CandidateInfo candidates;
+  candidates.candies.resize(2);
+  candidates.candies[0].str = L"候選甲";
+  candidates.candies[1].str = L"候選乙";
+  candidates.highlighted = 1;
+  candidates.currentPage = 0;
+  candidates.totalPages = 1;
+  std::wstringstream serialized;
+  boost::archive::text_woarchive archive(serialized);
+  archive << candidates;
+
+  std::wstring resp =
+      L"action=ctx\n"
+      L"ctx.preedit=候選乙=3.14\n"
+      L"ctx.preedit.cursor=0,3,3\n"
+      L"ctx.cand=" +
+      serialized.str() + L"\n";
+  DWORD len = static_cast<DWORD>(resp.size());
+  std::wstring commit;
+  weasel::Context ctx;
+  weasel::Status status;
+  weasel::ResponseParser parser(&commit, &ctx, &status);
+  parser(resp.data(), len);
   BOOST_TEST(commit.empty());
   BOOST_TEST(ctx.preedit.str == L"候選乙=3.14");
   BOOST_ASSERT(1 == ctx.preedit.attributes.size());
@@ -85,12 +111,190 @@ void test_4() {
   BOOST_TEST_EQ(1, c.totalPages);
 }
 
-int _tmain(int argc, _TCHAR* argv[]) {
-  test_1();
-  test_2();
-  test_3();
-  test_4();
+void test_jev_choices() {
+  using namespace weasel::jev;
+  BOOST_TEST(ClassifyText("\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93") == "han");
+  BOOST_TEST(ClassifyText("OpenAI") == "latin");
+  BOOST_TEST(ClassifyText("OpenAI\xe5\x8a\xa9\xe6\x89\x8b") == "mixed");
+  BOOST_TEST(IsSafeRawInput("wozhidao"));
+  BOOST_TEST(!IsSafeRawInput("wo zhi dao"));
+  BOOST_TEST(!IsSafeRawInput("\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93"));
 
-  system("pause");
-  return boost::report_errors();
+  const std::vector<std::string> candidates = {
+      "\xe6\x88\x91\xe6\x8c\x87\xe5\xae\x9a",
+      "\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93", "wozhidao"};
+  const auto choices = BuildChoices(candidates, "wozhidao");
+  BOOST_TEST_EQ(4, choices.size());
+  BOOST_TEST(choices[0].key == "candidate_0");
+  BOOST_TEST(choices[3].key == "raw_input");
+
+  const auto limited = BuildChoices(candidates, "wozhidao", 2);
+  BOOST_TEST_EQ(3, limited.size());
+  BOOST_TEST(limited[1].key == "candidate_1");
+  BOOST_TEST(limited[2].key == "raw_input");
+
+  const auto without_raw = BuildChoices(candidates, "wo zhi dao", 10);
+  BOOST_TEST_EQ(3, without_raw.size());
+
+  const auto with_empty_candidate =
+      BuildChoices({"", candidates[1]}, "wozhidao", 10);
+  BOOST_TEST_EQ(2, with_empty_candidate.size());
+  BOOST_TEST(with_empty_candidate[0].key == "candidate_1");
+}
+
+void test_jev_context_window() {
+  using namespace weasel::jev;
+  BOOST_TEST(UpdateContextWindow("already", " committed", 128) ==
+             "already committed");
+
+  const std::string semantic =
+      "aaaaaaaaaa\xe3\x80\x82"
+      "previous\xef\xbc\x8c"
+      "current";
+  BOOST_TEST(UpdateContextWindow({}, semantic, 20) ==
+             "previous\xef\xbc\x8c"
+             "current");
+
+  const std::string crlf = "aaaaaaaaaa.\r\nprevious,current";
+  BOOST_TEST(UpdateContextWindow({}, crlf, 20) == "previous,current");
+
+  const std::string emoji = "\xf0\x9f\x98\x80";
+  std::string many_emoji;
+  for (size_t i = 0; i < 130; ++i)
+    many_emoji += emoji;
+  BOOST_TEST(UpdateContextWindow({}, many_emoji, 128) ==
+             many_emoji.substr(emoji.size() * 2));
+}
+
+void test_jev_ranking_and_validation() {
+  using namespace weasel::jev;
+  RequestSnapshot request;
+  request.generation = 7;
+  request.session = 42;
+  request.context = "\xe8\xbf\x99\xe4\xb8\xaa\xe9\x97\xae\xe9\xa2\x98";
+  request.input = "wozhid";
+  request.candidates = {"\xe6\x88\x91\xe6\x8c\x87\xe5\xae\x9a",
+                        "\xe6\x88\x91\xe7\x9f\xa5\xe9\x81\x93",
+                        "\xe6\x88\x91\xe5\x8f\xaa\xe5\xaf\xb9"};
+  request.choices = BuildChoices(request.candidates, request.input);
+  const auto decision = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})");
+  BOOST_TEST(decision.has_value());
+  if (!decision)
+    return;
+  BOOST_TEST_EQ(1, decision->selected.candidate_index);
+  BOOST_TEST_EQ(1, decision->ranking[0].candidate_index);
+  BOOST_TEST_EQ(0, decision->ranking[1].candidate_index);
+  BOOST_TEST_EQ(2, decision->ranking[2].candidate_index);
+  BOOST_TEST(MatchesSnapshot(*decision, 42, "wozhid", request.candidates));
+  BOOST_TEST(!MatchesSnapshot(*decision, 43, "wozhid", request.candidates));
+  BOOST_TEST(!MatchesSnapshot(*decision, 42, "changed", request.candidates));
+  BOOST_TEST(!MatchesSnapshot(*decision, 42, "wozhid",
+                              {request.candidates[0], request.candidates[2]}));
+  BOOST_TEST(
+      !MatchesSnapshot(*decision, 42, "wozhid", request.candidates, 0.80));
+
+  const auto invalid = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"invented_text","confidence":0.99}}})");
+  BOOST_TEST(!invalid);
+
+  const auto incomplete = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12}}}})");
+  BOOST_TEST(!incomplete);
+
+  const auto selected_is_not_maximum = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_0","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})");
+  BOOST_TEST(!selected_is_not_maximum);
+
+  const auto selected_loses_stable_tie = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.40,"candidate_1":0.40,"candidate_2":0.20,"raw_input":0.0}}}})");
+  BOOST_TEST(!selected_loses_stable_tie);
+
+  const auto extra_probability = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.10,"candidate_1":0.70,"candidate_2":0.10,"raw_input":0.0,"invented_text":0.10}}}})");
+  BOOST_TEST(!extra_probability);
+
+  const auto out_of_range = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.0,"candidate_1":1.01,"candidate_2":0.0,"raw_input":0.0}}}})");
+  BOOST_TEST(!out_of_range);
+
+  const auto raw = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"raw_input","probabilities":{"candidate_0":0.05,"candidate_1":0.10,"candidate_2":0.05,"raw_input":0.80}}}})");
+  BOOST_TEST(raw.has_value());
+  if (raw) {
+    BOOST_TEST(static_cast<int>(raw->selected.kind) ==
+               static_cast<int>(ChoiceKind::raw_input));
+    BOOST_TEST(raw->selected.text == request.input);
+    BOOST_TEST(MatchesSnapshot(*raw, 42, "wozhid", request.candidates));
+  }
+
+  const auto raw_ties_candidate = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"raw_input","probabilities":{"candidate_0":0.50,"candidate_1":0.0,"candidate_2":0.0,"raw_input":0.50}}}})");
+  BOOST_TEST(!raw_ties_candidate);
+
+  RequestSnapshot request_with_empty = request;
+  request_with_empty.candidates = {"", request.candidates[1]};
+  request_with_empty.choices =
+      BuildChoices(request_with_empty.candidates, request_with_empty.input);
+  const auto ranked_with_empty = ParseDecision(
+      request_with_empty,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_1":0.80,"raw_input":0.20}}}})");
+  BOOST_TEST(ranked_with_empty.has_value());
+  if (ranked_with_empty) {
+    BOOST_TEST_EQ(2, ranked_with_empty->ranking.size());
+    BOOST_TEST_EQ(1, ranked_with_empty->ranking[0].candidate_index);
+    BOOST_TEST_EQ(0, ranked_with_empty->ranking[1].candidate_index);
+  }
+
+  const auto confidence_only = ParseDecision(
+      request,
+      R"({"answers":{"intent":{"choice":"candidate_1","confidence":0.75}}})");
+  BOOST_TEST(confidence_only.has_value());
+  if (confidence_only)
+    BOOST_TEST(
+        MatchesSnapshot(*confidence_only, 42, "wozhid", request.candidates));
+
+  RequestSnapshot malformed = request;
+  malformed.choices[0].candidate_index = 99;
+  BOOST_TEST(!ParseDecision(
+      malformed,
+      R"({"answers":{"intent":{"choice":"candidate_1","probabilities":{"candidate_0":0.12,"candidate_1":0.76,"candidate_2":0.12,"raw_input":0.0}}}})"));
+
+  malformed = request;
+  malformed.choices.back().text = "server_supplied_text";
+  BOOST_TEST(!ParseDecision(
+      malformed,
+      R"({"answers":{"intent":{"choice":"raw_input","probabilities":{"candidate_0":0.0,"candidate_1":0.0,"candidate_2":0.0,"raw_input":1.0}}}})"));
+}
+
+int _tmain(int argc, _TCHAR* argv[]) {
+  std::cerr << "[ RUN      ] ResponseParser.noop\n";
+  test_1();
+  std::cerr << "[ RUN      ] ResponseParser.commit\n";
+  test_2();
+  std::cerr << "[ RUN      ] ResponseParser.preedit\n";
+  test_3();
+  std::cerr << "[ RUN      ] ResponseParser.malformed_cursor\n";
+  test_malformed_cursor();
+  std::cerr << "[ RUN      ] ResponseParser.candidates\n";
+  test_4();
+  std::cerr << "[ RUN      ] Jev.choices\n";
+  test_jev_choices();
+  std::cerr << "[ RUN      ] Jev.context_window\n";
+  test_jev_context_window();
+  std::cerr << "[ RUN      ] Jev.ranking_and_validation\n";
+  test_jev_ranking_and_validation();
+
+  const int errors = boost::report_errors();
+  std::cerr << "[ COMPLETE ] errors=" << errors << "\n";
+  return errors;
 }

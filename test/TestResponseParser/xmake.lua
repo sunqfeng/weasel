@@ -1,6 +1,6 @@
 target("TestResponseParser")
   set_kind("binary")
-  add_files("./*.cpp")
+  add_files("./*.cpp", "../../RimeWithWeasel/JevIntentRouter.cpp")
   add_deps("WeaselIPC", "WeaselIPCServer")
   add_rules("subcmd")
   before_build(function(target)

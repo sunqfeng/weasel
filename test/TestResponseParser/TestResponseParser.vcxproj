@@ -328,6 +328,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\RimeWithWeasel\JevIntentRouter.cpp" />
     <ClCompile Include="stdafx.cpp" />
     <ClCompile Include="TestResponseParser.cpp" />
   </ItemGroup>
