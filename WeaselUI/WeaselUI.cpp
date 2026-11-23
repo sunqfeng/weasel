@@ -155,6 +155,12 @@ void UI::Refresh() {
   }
 }
 
+void UI::AdvanceJevAnimation() {
+  if (pimpl_) {
+    pimpl_->panel.AdvanceJevAnimation();
+  }
+}
+
 void UI::UpdateInputPosition(RECT const& rc) {
   if (pimpl_ && pimpl_->panel.IsWindow()) {
     pimpl_->panel.MoveTo(rc);

@@ -52,6 +52,8 @@ class UI {
 
   // 重绘界面
   void Refresh();
+  // Advances the Jev "requesting" spinner by one frame.
+  void AdvanceJevAnimation();
 
   // 置输入焦点位置（光标跟随时移动候选窗）但不重绘
   void UpdateInputPosition(RECT const& rc);

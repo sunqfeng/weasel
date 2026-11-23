@@ -64,6 +64,10 @@ class CCandidateList : public ITfIntegratableCandidateListUIElement,
   }
 
   weasel::UIStyle& style();
+  void AdvanceJevAnimation() {
+    if (_ui)
+      _ui->AdvanceJevAnimation();
+  }
 
  private:
   // void _UpdateOwner();

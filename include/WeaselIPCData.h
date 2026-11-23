@@ -118,16 +118,28 @@ struct CandidateInfo {
   std::vector<Text> labels;
 };
 
+// Visible state of the optional decision model for the current candidates.
+enum JevIndicator {
+  JEV_NONE = 0,
+  JEV_REQUESTING = 1,
+  JEV_RECOMMENDED = 2,
+  JEV_LOW_CONFIDENCE = 3,
+  JEV_FAILED = 4,
+};
+
 struct Context {
   Context() {}
   void clear() {
     preedit.clear();
     aux.clear();
     cinfo.clear();
+    jev_state = JEV_NONE;
+    jev_candidate = -1;
   }
   bool empty() const { return preedit.empty() && aux.empty() && cinfo.empty(); }
   bool operator==(const Context& ctx) {
-    if (preedit == ctx.preedit && aux == ctx.aux && cinfo == ctx.cinfo)
+    if (preedit == ctx.preedit && aux == ctx.aux && cinfo == ctx.cinfo &&
+        jev_state == ctx.jev_state && jev_candidate == ctx.jev_candidate)
       return true;
     return false;
   }
@@ -143,6 +155,10 @@ struct Context {
   Text preedit;
   Text aux;
   CandidateInfo cinfo;
+  // Indicator for the first candidate page; never reorders candidates.
+  int jev_state = JEV_NONE;
+  // Recommended candidate on the current page, or -1 for raw input / none.
+  int jev_candidate = -1;
 };
 // for icon type in tip
 enum IconType { SCHEMA, FULL_SHAPE };

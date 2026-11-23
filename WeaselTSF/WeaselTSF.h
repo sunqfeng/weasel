@@ -118,6 +118,11 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _ShowInlinePreedit(com_ptr<ITfContext> pContext,
                           const std::shared_ptr<weasel::Context> context);
   void _UpdateComposition(com_ptr<ITfContext> pContext);
+  // Polls the server for a pending Jev decision while one is in flight.
+  void _SyncJevPolling(bool requesting);
+  void _StopJevPolling();
+  void _OnJevTimer();
+  static VOID CALLBACK _JevTimerProc(HWND, UINT, UINT_PTR idEvent, DWORD);
   BOOL _IsComposing();
   BOOL _IsCurrentComposition(ITfComposition* pComposition);
   void _SetComposition(com_ptr<ITfComposition> pComposition);
@@ -236,4 +241,6 @@ class WeaselTSF : public ITfTextInputProcessorEx,
   BOOL _async_edit = false;
   BOOL _committed = false;
   BOOL _isToOpenClose = false;
+  UINT_PTR _jevTimer = 0;
+  int _jevTicks = 0;
 };

@@ -1,53 +1,107 @@
-# 小狼毫 Weasel · Jev 候选推荐实验版
+# 小狼毫 Weasel · Jev 候选推荐
 
-这是基于 [Rime 小狼毫（Weasel）](https://github.com/rime/weasel) 的个人 fork，面向 Windows。项目保留小狼毫原有的输入方案与配置方式，并增加了可选的 [TypeSafe Jev](https://typesafe.ai/) 候选推荐功能。Jev 功能仍处于实验阶段，默认关闭。
-
-本仓库的安装包和问题反馈请使用本项目链接；小狼毫及 Rime 的通用使用资料仍以[上游项目](https://github.com/rime/weasel)为准。
+这是基于 [Rime 小狼毫（Weasel）](https://github.com/rime/weasel) 的 Windows 输入法 fork。保留小狼毫原有的输入方案与配置方式，增加可选的 Jev 语境候选推荐、自定义决策模型接口，以及候选窗口状态图标。**Jev 默认关闭**；不启用时可按普通小狼毫使用。
 
 ## 下载与安装
 
-在本项目的 [Releases 页面](https://github.com/sunqfeng/weasel/releases)下载 `weasel` 开头的 `.exe` 安装包。目前提供的是**预发布测试版**。安装包未进行代码签名，Windows SmartScreen 可能显示提示；请核对下载来源后再决定是否运行。
+请在本项目的 [Releases 页面](https://github.com/sunqfeng/weasel/releases)下载 `weasel` 开头的 `.exe` 安装包；如果尚无可用安装包，请等待 [GitHub Actions](https://github.com/sunqfeng/weasel/actions) 构建并发布完成。安装包未进行代码签名，Windows SmartScreen 可能显示提示，请核对下载来源。
 
-小狼毫适用于 Windows 8.1 至 Windows 11。安装时可选择输入语言；安装完成后，从系统输入法列表切换到“小狼毫”即可使用。已有 Rime 配置通常位于 `%AppData%\Rime`，安装测试版前建议先备份该目录。
+小狼毫适用于 Windows 8.1 至 Windows 11。安装完成后，从系统输入法列表切换到“小狼毫”即可使用。已有 Rime 配置通常位于 `%AppData%\Rime`，升级前建议先备份。安装包不包含私人服务地址、模型选择或 API Key，也不会替你启用云端处理。
 
-即使不启用 Jev，本项目仍可按普通小狼毫使用。
+## 本 fork 新增特性
 
-## Jev 候选推荐
+- **可配置的决策接口与模型**：通过环境变量选择兼容 Jev 协议的 HTTPS endpoint 和 model，无需修改源码。保留 TLS 验证，拒绝重定向，避免凭据被转发。
+- **异步状态可视化**：候选窗以旋转圆环、星标、空心圆点和带斜线云朵表示请求与结果状态。
+- **结果返回后更新候选窗**：TSF 客户端轮询已完成的决策，用户无需先按空格才能看到推荐。
+- **只高亮，不重排**：保留 Rime 候选顺序；若请求期间用户已导航，不再自动移动高亮，仍用星标标出模型推荐。
+- **全应用与排除规则**：允许列表支持 `*` 和 `!app.exe`，排除项优先。
+- **可选诊断日志**：按需记录请求完成、决策概率与校验结果，候选文本日志默认关闭。
 
-输入拼音或英文字母时，小狼毫会先生成 Rime 原有候选，再异步向 Jev 发送最近已经上屏的文字、当前输入码和当前页前 10 个候选。Jev 根据前文语境返回每个安全选项的概率。用户按下不带修饰键的空格时，如果结果已经返回并通过校验，程序会高亮概率最高的候选，再沿用 Rime 的提交路径；Jev 也可以在安全校验通过时选择当前原始字母。模型不能提交选择集合以外的自由文本。
+## Jev 推荐行为与状态图标
 
-当前测试阶段尚未实现 Jev 结果返回后主动刷新 TSF 候选窗口，因此按空格前看到的候选顺序仍是 Rime 原顺序。实现“高概率候选提前显示在第 1 位”需要增加安全的服务端到 TSF 异步刷新通道，不能仅靠后台线程直接改界面。
+输入时，Rime 先生成普通候选，后台再向决策服务发送近期上屏文字、当前输入码及候选。模型只能从声明的候选或原始输入中选择，不能提交选择集合以外的自由文本。
 
-如果结果尚未返回、已过期、请求失败、响应越权，或者最高选择概率低于 60%，程序会沿用 Rime 原有候选顺序和提交行为。请求在后台执行，不阻塞普通按键；网络延迟过高时可能赶不上当前这次选词。
+| 图标 | 含义 |
+| --- | --- |
+| 候选窗角落的旋转圆环 | 决策请求进行中 |
+| 候选旁的星标 | 模型推荐该候选，选择概率至少为 60% |
+| 候选窗角落的星标 | 模型推荐保留原始输入；满足校验条件时按空格提交 |
+| 空心圆点 | 选择概率不足 60%，保留原生行为 |
+| 带斜线的云朵 | 请求失败或超时，沿用普通 Rime 行为 |
+| 无图标 | Jev 未启用、应用不在允许列表中，或没有可展示的决策状态 |
 
-功能需要 TypeSafe API Key，并且只会在你指定的应用中发送请求。启用后，请在 PowerShell 中运行：
+推荐结果不会改变候选顺序。仅在请求期间用户尚未导航时，程序自动高亮推荐候选；方向键、翻页、鼠标等交互不会被迟到的结果覆盖。原始输入推荐只有在第一页且输入与交互状态未变时，才会由空格提交。
+
+请求在后台执行，不阻塞普通按键。TSF 在请求期间约每 90 ms 轮询一次、最多约 4 秒，失去焦点或停用后停止轮询。过期或不匹配的结果会被丢弃；请求未及时返回时，继续使用普通输入行为。
+
+## 配置决策服务
+
+服务器读取以下环境变量。修改后必须让 **WeaselServer 在新的环境中重新启动**；仅修改环境变量不会更新已经运行的进程。
+
+| 变量 | 默认值 / 用途 |
+| --- | --- |
+| `WEASEL_JEV_ENABLED` | 设为 `1` 启用 Jev，默认关闭 |
+| `TYPESAFE_API_KEY` | 决策服务的 Bearer 凭据 |
+| `WEASEL_JEV_APPS` | 必填；允许发送请求的可执行文件名，支持逗号或分号分隔 |
+| `WEASEL_JEV_ENDPOINT` | 可选；兼容决策服务的完整 HTTPS URL，未设置时使用上游 TypeSafe 接口 |
+| `WEASEL_JEV_MODEL` | 可选；请求中的模型名，默认 `jev-latest` |
+
+例如，在 PowerShell 中为当前进程及其随后启动的子进程设置：
 
 ```powershell
-setx WEASEL_JEV_ENABLED "1"
-setx TYPESAFE_API_KEY "你的 TypeSafe API Key"
-setx WEASEL_JEV_APPS "notepad.exe,winword.exe"
+$env:WEASEL_JEV_ENABLED = '1'
+$env:TYPESAFE_API_KEY = '<your-api-key>'
+$env:WEASEL_JEV_APPS = 'notepad.exe,winword.exe'
+# 使用兼容的自定义服务时，再设置以下两项：
+# $env:WEASEL_JEV_ENDPOINT = 'https://example.com/decisions'
+# $env:WEASEL_JEV_MODEL = '<your-model>'
 ```
 
-`WEASEL_JEV_APPS` 是必填的应用白名单，可用逗号或分号分隔程序名。建议先只填写 `notepad.exe` 进行测试。`setx` 写入的是后续进程使用的用户环境变量；设置完成后，需要让小狼毫服务在新环境中重新启动，必要时退出并重新登录 Windows。
+先退出正在运行的小狼毫服务，再从同一个 PowerShell 窗口启动所安装的 `WeaselServer.exe`，它才会继承这些变量。以上配置不会永久保存；可使用自己的本地启动脚本管理，但不要把真实凭据提交到仓库。
 
-对于白名单中的应用，请求会发往 `https://api.typesafe.ai/v1/systemone`，内容包括最多 128 个最近提交的输入字符、当前预编辑文本和候选词。上下文优先从最近的句号、逗号、分号、问号、感叹号或换行边界开始，避免从 UTF-8 字符中间截断。输入区域失去焦点后，本地保存的这段输入上下文会被清除。请只把你愿意发送这些内容的应用加入白名单。
+允许列表示例：
 
-关闭功能可运行 `setx WEASEL_JEV_ENABLED "0"`，随后重新启动小狼毫服务。环境变量中的 API Key 不会因此自动删除。
+```text
+notepad.exe,winword.exe   # 仅启用指定应用
+*                        # 启用所有应用
+*, !keepass.exe          # 所有应用，但排除 keepass.exe
+```
+
+上面的注释仅供说明，不要把 `#` 后的文字写进变量值。程序名匹配不区分大小写；排除项优先，只有排除项而没有 `*` 或明确允许项时不会启用任何应用。建议先仅允许 `notepad.exe` 测试，再按隐私需求扩大范围。
+
+自定义 endpoint 必须使用 HTTPS，不能包含用户名、密码、查询参数或 fragment。服务必须兼容现有的 `state`、`questions.intent` 请求和 `answers.intent` 选择响应；并非任意聊天补全 API 都可以直接使用。
+
+### 诊断与隐私
+
+| 变量 | 用途 |
+| --- | --- |
+| `WEASEL_JEV_DIAGNOSTIC_LOG` | 本地追加日志文件路径；未设置则关闭 |
+| `WEASEL_JEV_LOG_DECISIONS=1` | 额外记录返回选择、置信度和概率 |
+| `WEASEL_JEV_LOG_CANDIDATES=1` | 额外记录候选与原始输入文本；默认关闭 |
+
+允许应用中的请求会包含最多 128 个近期上屏字符、当前预编辑文本及候选词。上下文按标点或换行边界截取，输入区域失去焦点后清除本地上下文。请仅允许愿意向所选服务发送输入内容的应用；启用 `*` 前尤其应考虑隐私。
+
+诊断日志不记录授权头或凭据，但候选文本日志可能暴露私人输入，只应在有意测试时开启，且应保存在仓库外。推荐只向服务器进程提供凭据，而不是永久保存到用户环境变量。
+
+关闭 Jev：将 `WEASEL_JEV_ENABLED` 设为 `0`，随后重启服务器；这不会自动删除已保存的凭据。
+
+协议、安全限制、超时与图标实现细节见 [决策接口配置文档](docs/jev-endpoint-configuration.md)。
 
 ## 小狼毫基本使用
 
 - 使用 <kbd>Ctrl</kbd> + <kbd>`</kbd> 或 <kbd>F4</kbd> 打开输入方案菜单。
 - 用户词库与配置文件位于 `%AppData%\Rime`。修改后需要执行“重新部署”。
-- 输入方案的自定义方法参见 [Rime 定制指南](https://github.com/rime/home/wiki/CustomizationGuide)；小狼毫的样式与行为设置参见[上游 Wiki](https://github.com/rime/weasel/wiki)。
+- 输入方案自定义参见 [Rime 定制指南](https://github.com/rime/home/wiki/CustomizationGuide)；样式与行为设置参见[上游 Wiki](https://github.com/rime/weasel/wiki)。
+- 默认中英文状态由用户的 Rime 方案配置决定；本 fork 不强制覆盖已有用户设置。
 
 ## 从源码构建
 
-本项目沿用上游小狼毫的 Windows 构建流程，具体依赖和命令见 [INSTALL.md](INSTALL.md)。GitHub Actions 会执行格式检查，并使用 MSBuild 与 xmake 构建；通过构建不代表 Jev 功能已经完成真实 API 的端到端验证。
+沿用上游 Windows 构建流程，依赖和命令见 [INSTALL.md](INSTALL.md)。GitHub Actions 执行格式检查，并使用 MSBuild 与 xmake 构建。CI 成功不等同于对所有决策服务完成端到端验证。
 
 ## 问题反馈
 
-与本 fork 的 Jev 功能、测试版安装包有关的问题，请在[本项目 Issues](https://github.com/sunqfeng/weasel/issues)反馈。小狼毫本体的问题可参考[上游 Issues](https://github.com/rime/weasel/issues)。反馈时请说明 Windows 版本、小狼毫版本、使用的输入方案及复现步骤；不要公开 API Key 或包含敏感输入的日志。
+本 fork 的新增功能或安装包问题，请在[本项目 Issues](https://github.com/sunqfeng/weasel/issues)反馈；小狼毫本体问题可参考[上游 Issues](https://github.com/rime/weasel/issues)。请提供 Windows 版本、输入法版本、输入方案及复现步骤，不要公开 API Key 或包含敏感输入的日志。
 
 ## 上游与许可
 
-本项目基于 [rime/weasel](https://github.com/rime/weasel)，输入引擎、输入方案、界面和大量依赖均来自 Rime 社区及上游贡献者。感谢[上游贡献者](https://github.com/rime/weasel/graphs/contributors)。本项目沿用 [GNU GPLv3 许可](LICENSE.txt)；各第三方组件仍遵循其各自的许可证。
+本项目基于 [rime/weasel](https://github.com/rime/weasel)，输入引擎、输入方案、界面及大量依赖来自 Rime 社区与上游贡献者。感谢[上游贡献者](https://github.com/rime/weasel/graphs/contributors)。沿用 [GNU GPLv3 许可](LICENSE.txt)，第三方组件遵循各自许可证。

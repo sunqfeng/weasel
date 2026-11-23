@@ -56,6 +56,8 @@ STDMETHODIMP WeaselTSF::DoEditSession(TfEditCookie ec) {
   // still updated by the queued read session after the new composition is
   // created.
   _UpdateUI(*context, _status);
+  if (ok)
+    _SyncJevPolling(context->jev_state == weasel::JEV_REQUESTING);
 
   return TRUE;
 }

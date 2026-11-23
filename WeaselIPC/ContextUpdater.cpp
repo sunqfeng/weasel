@@ -37,6 +37,18 @@ void ContextUpdater::Store(Deserializer::KeyType const& k,
     _StoreCand(k, value);
     return;
   }
+
+  // ctx.jev=<state>,<candidate index or -1>; unknown to older clients.
+  if (k[1] == L"jev" && k.size() == 2) {
+    int state = JEV_NONE, candidate = -1;
+    if (swscanf_s(value.c_str(), L"%d,%d", &state, &candidate) == 2 &&
+        state >= JEV_NONE && state <= JEV_FAILED && candidate >= -1 &&
+        candidate < 100) {
+      m_pTarget->p_context->jev_state = state;
+      m_pTarget->p_context->jev_candidate = candidate;
+    }
+    return;
+  }
 }
 
 void ContextUpdater::_StoreText(Text& target,

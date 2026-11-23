@@ -66,6 +66,7 @@ STDMETHODIMP WeaselTSF::OnSetFocus(BOOL fForeground) {
   if (fForeground)
     m_client.FocusIn();
   else {
+    _StopJevPolling();
     m_client.FocusOut();
     _AbortComposition();
   }

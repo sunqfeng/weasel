@@ -32,6 +32,7 @@ enum WEASEL_IPC_COMMAND {
   WEASEL_IPC_SELECT_CANDIDATE_ON_CURRENT_PAGE,
   WEASEL_IPC_HIGHLIGHT_CANDIDATE_ON_CURRENT_PAGE,
   WEASEL_IPC_CHANGE_PAGE,
+  WEASEL_IPC_POLL_JEV,
   WEASEL_IPC_LAST_COMMAND
 };
 
@@ -78,6 +79,9 @@ struct RequestHandler {
   virtual bool ChangePage(bool backward, DWORD session_id, EatLine eat) {
     return false;
   }
+  // Applies a completed decision, if any, and responds only when it changed
+  // the visible state.
+  virtual bool PollJev(DWORD session_id, EatLine eat) { return false; }
   virtual void FocusIn(DWORD param, DWORD session_id) {}
   virtual void FocusOut(DWORD param, DWORD session_id) {}
   virtual void UpdateInputPosition(RECT const& rc, DWORD session_id) {}
@@ -136,6 +140,8 @@ class Client {
   bool HighlightCandidateOnCurrentPage(size_t index);
   // 翻页，backward = true 向前翻，false向后翻
   bool ChangePage(bool backward);
+  // 拉取决策模型的异步结果；有更新时返回 true，可读取回应
+  bool PollJev();
   // 更新输入位置
   void UpdateInputPosition(RECT const& rc);
   // 输入窗口获得焦点

@@ -65,6 +65,8 @@ class WeaselPanel
   void DoPaint(CDCHandle dc);
   bool GetIsReposition() { return m_istorepos; }
   void RedrawWindow();
+  // Advances the Jev "requesting" spinner by one frame if it is visible.
+  void AdvanceJevAnimation();
 
   static VOID CALLBACK OnTimer(_In_ HWND hwnd,
                                _In_ UINT uMsg,
@@ -103,6 +105,9 @@ class WeaselPanel
                 IDWriteTextFormat1* const pTextFormat = NULL);
 
   void _LayerUpdate(const CRect& rc, CDCHandle dc);
+  void _DrawJevIndicators(CDCHandle& dc);
+
+  int m_jevAngle = 0;
 
   weasel::Layout* m_layout;
   weasel::Context& m_ctx;

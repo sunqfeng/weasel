@@ -4,6 +4,7 @@
 #include "CandidateList.h"
 #include <KeyEvent.h>
 #include <math.h>
+#include <mutex>
 
 using namespace std;
 using namespace weasel;
@@ -435,6 +436,66 @@ void WeaselTSF::_HandleMouseHoverEvent(const size_t index) {
     m_client.HighlightCandidateOnCurrentPage(index);
     _UpdateComposition(_pEditSessionContext);
   }
+}
+
+namespace {
+// Thread timers carry no user data, so map each timer to its text service.
+std::mutex g_jevTimersMutex;
+std::map<UINT_PTR, WeaselTSF*> g_jevTimers;
+constexpr UINT kJevPollInterval = 90;  // ms; also the spinner frame rate
+constexpr int kJevPollLimit = 45;      // give up after about 4 seconds
+}  // namespace
+
+void WeaselTSF::_SyncJevPolling(bool requesting) {
+  if (!requesting) {
+    _StopJevPolling();
+    return;
+  }
+  _jevTicks = 0;
+  if (_jevTimer)
+    return;
+  _jevTimer = SetTimer(NULL, 0, kJevPollInterval, _JevTimerProc);
+  if (_jevTimer) {
+    std::lock_guard<std::mutex> lock(g_jevTimersMutex);
+    g_jevTimers[_jevTimer] = this;
+  }
+}
+
+void WeaselTSF::_StopJevPolling() {
+  if (!_jevTimer)
+    return;
+  KillTimer(NULL, _jevTimer);
+  {
+    std::lock_guard<std::mutex> lock(g_jevTimersMutex);
+    g_jevTimers.erase(_jevTimer);
+  }
+  _jevTimer = 0;
+}
+
+VOID CALLBACK WeaselTSF::_JevTimerProc(HWND, UINT, UINT_PTR idEvent, DWORD) {
+  WeaselTSF* self = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_jevTimersMutex);
+    auto it = g_jevTimers.find(idEvent);
+    if (it != g_jevTimers.end())
+      self = it->second;
+  }
+  if (self)
+    self->_OnJevTimer();
+  else
+    KillTimer(NULL, idEvent);
+}
+
+void WeaselTSF::_OnJevTimer() {
+  if (++_jevTicks > kJevPollLimit || !_pEditSessionContext) {
+    _StopJevPolling();
+    return;
+  }
+  _cand->AdvanceJevAnimation();
+  // The server answers only when the decision changed the visible state;
+  // the edit session then reads the response and restarts or stops polling.
+  if (m_client.PollJev())
+    _UpdateComposition(_pEditSessionContext);
 }
 
 void WeaselTSF::HandleUICallback(size_t* const sel,

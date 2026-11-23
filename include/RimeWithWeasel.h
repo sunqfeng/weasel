@@ -38,6 +38,17 @@ struct SessionStatus {
   std::string jev_history;
   std::string jev_last_signature;
   std::string jev_pending_commit;
+  // Visible decision state for the current first candidate page.
+  int jev_indicator = weasel::JEV_NONE;
+  int jev_candidate = -1;
+  // Request owned by this session and the user state it was taken from.
+  uint64_t jev_generation = 0;
+  uint64_t jev_interaction = 0;
+  int jev_highlighted = 0;
+  // Raw-input choice that Space may commit while the state is unchanged.
+  std::string jev_raw_choice;
+  // Incremented by every user action that may change selection or paging.
+  uint64_t interaction = 0;
 };
 typedef std::map<DWORD, SessionStatus> SessionStatusMap;
 typedef DWORD WeaselSessionId;
@@ -61,6 +72,7 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
                                                WeaselSessionId ipc_id,
                                                EatLine eat);
   virtual bool ChangePage(bool backward, WeaselSessionId ipc_id, EatLine eat);
+  virtual bool PollJev(WeaselSessionId ipc_id, EatLine eat);
   virtual void FocusIn(DWORD param, WeaselSessionId ipc_id);
   virtual void FocusOut(DWORD param, WeaselSessionId ipc_id);
   virtual void UpdateInputPosition(RECT const& rc, WeaselSessionId ipc_id);
@@ -96,6 +108,9 @@ class RimeWithWeaselHandler : public weasel::RequestHandler {
   void _StopJev();
   void _ScheduleJev(WeaselSessionId ipc_id, const RimeContext& ctx);
   bool _ApplyJev(WeaselSessionId ipc_id);
+  bool _ConsumeJevOutcome(WeaselSessionId ipc_id);
+  void _ResetJevIndicator(SessionStatus& status);
+  void _NoteInteraction(WeaselSessionId ipc_id);
 
   RimeSessionId to_session_id(WeaselSessionId ipc_id) {
     return m_session_status_map[ipc_id].session_id;

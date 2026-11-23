@@ -1078,6 +1078,11 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
     }
     // end texts drawing
 
+    if (m_candidateCount && m_ctx.jev_state != JEV_NONE) {
+      _DrawJevIndicators(memDC);
+      drawn = true;
+    }
+
     // status icon (I guess Metro IME stole my idea :)
     if (m_layout->ShouldDisplayStatusIcon()) {
       // decide if custom schema zhung icon to show
@@ -1123,6 +1128,113 @@ void WeaselPanel::RedrawWindow() {
   HDC hdc = GetDC();
   DoPaint(hdc);
   ReleaseDC(hdc);
+}
+
+void WeaselPanel::AdvanceJevAnimation() {
+  if (!IsWindow() || !IsWindowVisible() || m_ctx.jev_state != JEV_REQUESTING)
+    return;
+  m_jevAngle = (m_jevAngle + 40) % 360;
+  RedrawWindow();
+}
+
+namespace {
+Gdiplus::Color JevColor(int color, BYTE minimum_alpha = 0xc0) {
+  BYTE alpha = (BYTE)((color >> 24) & 255);
+  if (alpha < minimum_alpha)
+    alpha = minimum_alpha;
+  return Gdiplus::Color::MakeARGB(alpha, GetRValue(color), GetGValue(color),
+                                  GetBValue(color));
+}
+
+void FillJevStar(Gdiplus::Graphics& g,
+                 const Gdiplus::Brush& brush,
+                 float cx,
+                 float cy,
+                 float r) {
+  Gdiplus::PointF points[10];
+  const float inner = r * 0.45f;
+  for (int i = 0; i < 10; ++i) {
+    const float radius = (i % 2) ? inner : r;
+    const float angle = -1.5707963f + i * 0.6283185f;
+    points[i] =
+        Gdiplus::PointF(cx + radius * cosf(angle), cy + radius * sinf(angle));
+  }
+  g.FillPolygon(&brush, points, 10);
+}
+}  // namespace
+
+// Jev decision state, drawn as small shapes:
+//   requesting      spinning ring at the panel corner
+//   recommended     star on the recommended candidate (or the panel corner
+//                   when the recommendation is to keep the raw input)
+//   low confidence  hollow dot at the panel corner; native order is kept
+//   failed          cloud with a slash at the panel corner
+void WeaselPanel::_DrawJevIndicators(CDCHandle& dc) {
+  Gdiplus::Graphics g(dc);
+  g.SetSmoothingMode(Gdiplus::SmoothingMode::SmoothingModeHighQuality);
+
+  const CRect content = m_layout->GetContentRect();
+  const float size = (float)max(DPI_SCALE(9), 6);
+  const float corner_inset =
+      max((float)DPI_SCALE(min(m_style.margin_x, m_style.margin_y)) / 2.0f,
+          size / 2.0f + 1.0f);
+  const float cx = content.right - corner_inset;
+  const float cy = content.top + corner_inset;
+  const Gdiplus::Color fg = JevColor(m_style.label_text_color);
+  const float stroke = max(size / 5.0f, 1.2f);
+
+  switch (m_ctx.jev_state) {
+    case JEV_REQUESTING: {
+      Gdiplus::Pen pen(fg, stroke);
+      pen.SetStartCap(Gdiplus::LineCapRound);
+      pen.SetEndCap(Gdiplus::LineCapRound);
+      const float r = size / 2.0f - stroke / 2.0f;
+      g.DrawArc(&pen, cx - r, cy - r, 2 * r, 2 * r, (float)m_jevAngle, 270.0f);
+      break;
+    }
+    case JEV_LOW_CONFIDENCE: {
+      Gdiplus::Pen pen(fg, stroke);
+      const float r = size / 2.0f - stroke;
+      g.DrawEllipse(&pen, cx - r, cy - r, 2 * r, 2 * r);
+      break;
+    }
+    case JEV_FAILED: {
+      Gdiplus::SolidBrush brush(fg);
+      const float w = size * 1.2f, h = size * 0.8f;
+      const float left = cx - w / 2, top = cy - h / 2;
+      g.FillEllipse(&brush, left, top + h * 0.35f, w * 0.45f, h * 0.65f);
+      g.FillEllipse(&brush, left + w * 0.2f, top, w * 0.55f, h * 0.8f);
+      g.FillEllipse(&brush, left + w * 0.5f, top + h * 0.25f, w * 0.5f,
+                    h * 0.75f);
+      g.FillRectangle(&brush, left + w * 0.2f, top + h * 0.6f, w * 0.6f,
+                      h * 0.4f);
+      Gdiplus::Pen gap(JevColor(m_style.back_color, 0xff), stroke * 2.2f);
+      Gdiplus::Pen slash(fg, stroke);
+      g.DrawLine(&gap, left, top - 1, left + w, top + h + 1);
+      g.DrawLine(&slash, left, top - 1, left + w, top + h + 1);
+      break;
+    }
+    case JEV_RECOMMENDED: {
+      const int index = m_ctx.jev_candidate;
+      if (index >= 0 && index < m_candidateCount) {
+        CRect rc = m_layout->GetCandidateRect(index);
+        if (m_istorepos)
+          rc.OffsetRect(0, m_offsetys[index]);
+        const bool hilited = index == m_ctx.cinfo.highlighted;
+        Gdiplus::SolidBrush brush(
+            JevColor(hilited ? m_style.hilited_label_text_color
+                             : m_style.label_text_color));
+        const float r = size / 2.0f;
+        FillJevStar(g, brush, rc.right - r - 1, rc.top + r + 1, r);
+      } else {
+        Gdiplus::SolidBrush brush(fg);
+        FillJevStar(g, brush, cx, cy, size / 2.0f);
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 void WeaselPanel::_LayerUpdate(const CRect& rc, CDCHandle dc) {
